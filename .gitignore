@@ -1,0 +1,25 @@
+# Build artifacts
+/target/
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test/runtime directories
+/tmp/
+*.log
+
+# Credentials (never commit these)
+*.pem
+*.key
+credentials.json
+.env
+.env.*

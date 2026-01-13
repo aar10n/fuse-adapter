@@ -1,0 +1,25 @@
+# S3 connector configuration for LocalStack
+#
+# Prerequisites:
+#   make localstack-start
+#   make localstack-setup
+#
+# Usage:
+#   make run-s3-localstack
+
+logging:
+  level: debug
+
+mounts:
+  - path: /tmp/fuse-adapter/s3
+    connector:
+      type: s3
+      bucket: test-bucket
+      region: us-east-1
+      endpoint: "http://localhost:4566"
+      force_path_style: true
+    cache:
+      type: filesystem
+      path: /tmp/fuse-adapter/cache/s3
+      max_size: "512MB"
+      flush_interval: 30s

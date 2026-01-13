@@ -1,0 +1,68 @@
+# fuse-adapter configuration example
+#
+# This file demonstrates how to configure fuse-adapter with various
+# connectors and cache layers.
+
+# Logging configuration
+logging:
+  # Log level: trace, debug, info, warn, error
+  level: info
+
+# Mount point configurations
+mounts:
+  # S3 bucket mount example
+  - path: /mnt/s3-data
+    connector:
+      type: s3
+      bucket: my-data-bucket
+      region: us-east-1
+      # Optional: prefix all keys with this path
+      prefix: "sandbox/"
+      # Optional: custom endpoint for S3-compatible stores (MinIO, LocalStack)
+      # endpoint: "http://localhost:9000"
+      # Optional: force path-style URLs (required for some S3-compatible stores)
+      # force_path_style: true
+    cache:
+      type: filesystem
+      path: /var/cache/fuse-adapter/s3-data
+      # max_size: 1GB  # Not yet implemented
+      # flush_interval: 30s  # Not yet implemented
+
+  # Read-only S3 mount with memory cache
+  - path: /mnt/s3-readonly
+    connector:
+      type: s3
+      bucket: public-datasets
+      region: us-west-2
+    cache:
+      type: memory
+      max_entries: 1000
+
+  # S3 mount without caching (not recommended for write operations)
+  - path: /mnt/s3-direct
+    connector:
+      type: s3
+      bucket: temp-storage
+      region: us-east-1
+    cache:
+      type: none
+
+  # Database connector (not yet implemented)
+  # - path: /mnt/db-files
+  #   connector:
+  #     type: database
+  #     connection_string: postgres://user:pass@localhost/files
+  #     table: file_storage
+  #   cache:
+  #     type: memory
+  #     max_entries: 500
+
+  # Google Drive connector (not yet implemented)
+  # - path: /mnt/gdrive
+  #   connector:
+  #     type: gdrive
+  #     credentials_path: /etc/fuse-adapter/gdrive-creds.json
+  #     root_folder_id: "abc123def456"
+  #   cache:
+  #     type: filesystem
+  #     path: /var/cache/fuse-adapter/gdrive
