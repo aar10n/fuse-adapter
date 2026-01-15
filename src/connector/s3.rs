@@ -71,7 +71,12 @@ impl S3Connector {
         } else if self.prefix.is_empty() {
             path_str.to_string()
         } else {
-            format!("{}{}", self.prefix, path_str)
+            // Ensure proper separator between prefix and path
+            if self.prefix.ends_with('/') {
+                format!("{}{}", self.prefix, path_str)
+            } else {
+                format!("{}/{}", self.prefix, path_str)
+            }
         }
     }
 
@@ -79,7 +84,8 @@ impl S3Connector {
     #[allow(dead_code)]
     fn key_to_path(&self, key: &str) -> std::path::PathBuf {
         let key = key.strip_prefix(&self.prefix).unwrap_or(key);
-        std::path::PathBuf::from(format!("/{}", key.trim_end_matches('/')))
+        let key = key.trim_start_matches('/').trim_end_matches('/');
+        std::path::PathBuf::from(format!("/{}", key))
     }
 
     /// Extract the filename from an S3 key

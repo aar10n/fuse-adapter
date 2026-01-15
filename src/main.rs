@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
 
 use fuse_adapter::cache::filesystem::{FilesystemCache, FilesystemCacheConfig};
@@ -100,6 +100,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 continue;
             }
         };
+
+        // Create mount point directory if it doesn't exist
+        if !mount_config.path.exists() {
+            debug!("Creating mount point directory {:?}", mount_config.path);
+            if let Err(e) = std::fs::create_dir_all(&mount_config.path) {
+                error!(
+                    "Failed to create mount point {:?}: {}",
+                    mount_config.path, e
+                );
+                continue;
+            }
+        }
 
         // Mount the filesystem
         if let Err(e) = manager.mount(mount_config.path.clone(), connector) {

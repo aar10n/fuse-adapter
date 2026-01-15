@@ -6,23 +6,23 @@ This guide explains how to implement a new storage connector for fuse-adapter. C
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    FUSE Interface                        │
-│                    (fuser crate)                         │
+│                    FUSE Interface                       │
+│                    (fuser crate)                        │
 └─────────────────────────┬───────────────────────────────┘
                           │
 ┌─────────────────────────▼───────────────────────────────┐
-│                    FuseAdapter                           │
-│           (inode mapping, capability checking)           │
+│                    FuseAdapter                          │
+│           (inode mapping, capability checking)          │
 └─────────────────────────┬───────────────────────────────┘
                           │
 ┌─────────────────────────▼───────────────────────────────┐
-│              Optional Cache Layer                        │
+│              Optional Cache Layer                       │
 │     (FilesystemCache, MemoryCache, or NoCache)          │
 └─────────────────────────┬───────────────────────────────┘
                           │
 ┌─────────────────────────▼───────────────────────────────┐
-│                  Your Connector                          │
-│            (implements Connector trait)                  │
+│                  Your Connector                         │
+│            (implements Connector trait)                 │
 └─────────────────────────────────────────────────────────┘
 ```
 

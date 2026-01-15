@@ -10,16 +10,24 @@
 logging:
   level: debug
 
-mounts:
-  - path: /tmp/fuse-adapter/s3
-    connector:
-      type: s3
-      bucket: test-bucket
-      region: us-east-1
-      endpoint: "http://localhost:9000"
-      force_path_style: true
+connectors:
+  s3:
+    bucket: test-bucket
+    region: us-east-1
+    endpoint: "http://localhost:9000"
+    force_path_style: true
     cache:
       type: filesystem
       path: /tmp/fuse-adapter/cache/s3
       max_size: "512MB"
       flush_interval: 30s
+
+mounts:
+  - path: /tmp/fuse-adapter/s3/a
+    connector:
+      type: s3
+      prefix: "data/path_a"
+  - path: /tmp/fuse-adapter/s3/b
+    connector:
+      type: s3
+      prefix: "data/path_b"

@@ -8,36 +8,67 @@ logging:
   # Log level: trace, debug, info, warn, error
   level: info
 
-# Mount point configurations
-mounts:
-  # S3 bucket mount example
-  - path: /mnt/s3-data
-    connector:
-      type: s3
-      bucket: my-data-bucket
-      region: us-east-1
-      # Optional: prefix all keys with this path
-      prefix: "sandbox/"
-      # Optional: custom endpoint for S3-compatible stores (MinIO, LocalStack)
-      # endpoint: "http://localhost:9000"
-      # Optional: force path-style URLs (required for some S3-compatible stores)
-      # force_path_style: true
+# =============================================================================
+# Connector Defaults (Optional)
+# =============================================================================
+# Define default settings for each connector type. Mounts can inherit these
+# defaults and only specify overrides (like prefix for different subpaths).
+
+connectors:
+  s3:
+    bucket: my-shared-bucket
+    region: us-east-1
+    # Optional: custom endpoint for S3-compatible stores (MinIO, LocalStack)
+    # endpoint: "http://localhost:9000"
+    # Optional: force path-style URLs (required for some S3-compatible stores)
+    # force_path_style: true
+    # Optional: default cache for all S3 mounts
     cache:
       type: filesystem
-      path: /var/cache/fuse-adapter/s3-data
-      # max_size: 1GB  # Not yet implemented
-      # flush_interval: 30s  # Not yet implemented
+      path: /var/cache/fuse-adapter/s3
+      max_size: "1GB"
+      flush_interval: 30s
 
-  # Read-only S3 mount with memory cache
-  - path: /mnt/s3-readonly
+# =============================================================================
+# Mount Points
+# =============================================================================
+# Each mount can either:
+# 1. Use connector defaults (just specify type + any overrides)
+# 2. Provide full connector config (for different buckets, etc.)
+
+mounts:
+  # --- Using Connector Defaults ---
+  # These mounts inherit bucket, region, endpoint, etc. from connectors.s3
+  # and only specify the subpath prefix. They also inherit the default cache.
+
+  - path: /mnt/s3-exports
     connector:
       type: s3
-      bucket: public-datasets
-      region: us-west-2
+      prefix: "data/exports/"
+
+  - path: /mnt/s3-imports
+    connector:
+      type: s3
+      prefix: "data/imports/"
+    # Override the default cache for this mount
     cache:
       type: memory
       max_entries: 1000
 
+  # --- Full Config (Ignoring Defaults) ---
+  # When you specify 'bucket', the mount uses full config mode and
+  # ignores connector defaults entirely.
+
+  - path: /mnt/s3-other-bucket
+    connector:
+      type: s3
+      bucket: other-bucket
+      region: eu-west-1
+    cache:
+      type: filesystem
+      path: /var/cache/fuse-adapter/other-bucket
+
+  # --- Minimal Config ---
   # S3 mount without caching (not recommended for write operations)
   - path: /mnt/s3-direct
     connector:
@@ -47,7 +78,7 @@ mounts:
     cache:
       type: none
 
-  # Database connector (not yet implemented)
+  # --- Database connector (not yet implemented) ---
   # - path: /mnt/db-files
   #   connector:
   #     type: database
@@ -57,7 +88,7 @@ mounts:
   #     type: memory
   #     max_entries: 500
 
-  # Google Drive connector (not yet implemented)
+  # --- Google Drive connector (not yet implemented) ---
   # - path: /mnt/gdrive
   #   connector:
   #     type: gdrive
