@@ -37,7 +37,7 @@ fn to_fuse_file_type(ft: FileType) -> FuseFileType {
 /// Convert Metadata to FileAttr
 fn metadata_to_attr(ino: u64, meta: &Metadata) -> FileAttr {
     let kind = to_fuse_file_type(meta.file_type);
-    let perm = if meta.is_dir() { 0o755 } else { 0o644 };
+    let perm = meta.mode_or_default() as u16;
     let nlink = if meta.is_dir() { 2 } else { 1 };
     let blocks = (meta.size + BLOCK_SIZE as u64 - 1) / BLOCK_SIZE as u64;
 
@@ -113,6 +113,13 @@ impl FuseAdapter {
         Ok(())
     }
 
+    fn check_set_mode_capability(&self) -> Result<(), i32> {
+        if !self.connector.capabilities().set_mode {
+            return Err(libc::ENOSYS);
+        }
+        Ok(())
+    }
+
     /// Run an async operation on the dedicated FUSE runtime and wait for the result.
     /// Uses block_on which properly drives the runtime's I/O driver.
     fn run_async<F, T>(&self, future: F) -> T
@@ -183,7 +190,7 @@ impl Filesystem for FuseAdapter {
         &mut self,
         _req: &Request<'_>,
         ino: u64,
-        _mode: Option<u32>,
+        mode: Option<u32>,
         _uid: Option<u32>,
         _gid: Option<u32>,
         size: Option<u64>,
@@ -197,20 +204,49 @@ impl Filesystem for FuseAdapter {
         _flags: Option<u32>,
         reply: ReplyAttr,
     ) {
-        // Only handle truncate (size change), ignore permission changes
+        let path = match self.inode_to_path(ino) {
+            Ok(p) => p,
+            Err(e) => {
+                reply.error(e);
+                return;
+            }
+        };
+
+        // Handle mode change (chmod)
+        if let Some(new_mode) = mode {
+            if let Err(e) = self.check_set_mode_capability() {
+                reply.error(e);
+                return;
+            }
+
+            trace!("setattr chmod: {:?} to {:o}", path, new_mode);
+
+            let connector = self.connector.clone();
+            let path_for_async = path.clone();
+            // Extract just the permission bits (lower 12 bits)
+            let perm_bits = new_mode & 0o7777;
+            match self.run_async(async move {
+                connector.set_mode(&path_for_async, perm_bits).await?;
+                connector.stat(&path_for_async).await
+            }) {
+                Ok(meta) => {
+                    let attr = metadata_to_attr(ino, &meta);
+                    reply.attr(&ATTR_TTL, &attr);
+                }
+                Err(e) => {
+                    error!("setattr chmod error for ino {}: {}", ino, e);
+                    reply.error(e.to_errno());
+                }
+            }
+            return;
+        }
+
+        // Handle truncate (size change)
         if let Some(new_size) = size {
             if let Err(e) = self.check_truncate_capability() {
                 reply.error(e);
                 return;
             }
-
-            let path = match self.inode_to_path(ino) {
-                Ok(p) => p,
-                Err(e) => {
-                    reply.error(e);
-                    return;
-                }
-            };
 
             trace!("setattr truncate: {:?} to {} bytes", path, new_size);
 
@@ -228,10 +264,11 @@ impl Filesystem for FuseAdapter {
                     reply.error(e.to_errno());
                 }
             }
-        } else {
-            // No size change, just return current attributes
-            self.getattr(_req, ino, reply);
+            return;
         }
+
+        // No changes requested, just return current attributes
+        self.getattr(_req, ino, reply);
     }
 
     fn read(
@@ -318,8 +355,8 @@ impl Filesystem for FuseAdapter {
         _req: &Request<'_>,
         parent: u64,
         name: &OsStr,
-        _mode: u32,
-        _umask: u32,
+        mode: u32,
+        umask: u32,
         _flags: i32,
         reply: ReplyCreate,
     ) {
@@ -337,12 +374,14 @@ impl Filesystem for FuseAdapter {
         };
 
         let path = parent_path.join(name);
-        debug!("create: {:?}", path);
+        // Apply umask to get effective mode (permission bits only)
+        let effective_mode = (mode & !umask) & 0o7777;
+        debug!("create: {:?} mode={:o}", path, effective_mode);
 
         let connector = self.connector.clone();
         let path_for_async = path.clone();
         match self.run_async(async move {
-            connector.create_file(&path_for_async).await?;
+            connector.create_file_with_mode(&path_for_async, effective_mode).await?;
             connector.stat(&path_for_async).await
         }) {
             Ok(meta) => {
@@ -362,8 +401,8 @@ impl Filesystem for FuseAdapter {
         _req: &Request<'_>,
         parent: u64,
         name: &OsStr,
-        _mode: u32,
-        _umask: u32,
+        mode: u32,
+        umask: u32,
         reply: ReplyEntry,
     ) {
         if let Err(e) = self.check_write_capability() {
@@ -380,12 +419,14 @@ impl Filesystem for FuseAdapter {
         };
 
         let path = parent_path.join(name);
-        debug!("mkdir: {:?}", path);
+        // Apply umask to get effective mode (permission bits only)
+        let effective_mode = (mode & !umask) & 0o7777;
+        debug!("mkdir: {:?} mode={:o}", path, effective_mode);
 
         let connector = self.connector.clone();
         let path_for_async = path.clone();
         match self.run_async(async move {
-            connector.create_dir(&path_for_async).await?;
+            connector.create_dir_with_mode(&path_for_async, effective_mode).await?;
             connector.stat(&path_for_async).await
         }) {
             Ok(meta) => {

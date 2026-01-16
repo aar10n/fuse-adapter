@@ -69,6 +69,7 @@ struct CachedMetadata {
 /// - Periodically flushes dirty files based on config
 /// - Caches metadata with TTL
 /// - Handles read-through caching
+/// - Preserves POSIX file modes
 pub struct FilesystemCache<C: Connector> {
     inner: Arc<C>,
     config: FilesystemCacheConfig,
@@ -76,6 +77,8 @@ pub struct FilesystemCache<C: Connector> {
     dirty_files: DashMap<PathBuf, DirtyFileState>,
     /// Cached metadata with TTL
     metadata_cache: DashMap<PathBuf, CachedMetadata>,
+    /// Cached file modes (separate from metadata for persistence across flushes)
+    mode_cache: DashMap<PathBuf, u32>,
     /// Current approximate cache size
     cache_size: RwLock<u64>,
     /// Shutdown notification
@@ -95,6 +98,7 @@ impl<C: Connector> FilesystemCache<C> {
             config,
             dirty_files: DashMap::new(),
             metadata_cache: DashMap::new(),
+            mode_cache: DashMap::new(),
             cache_size: RwLock::new(0),
             shutdown: Arc::new(Notify::new()),
         }
@@ -225,6 +229,7 @@ impl<C: Connector> FilesystemCache<C> {
 
         self.dirty_files.remove(path);
         self.metadata_cache.remove(path);
+        self.mode_cache.remove(path);
     }
 
     /// Flush a specific file from cache to backend
@@ -393,6 +398,9 @@ impl<C: Connector + 'static> Connector for FilesystemCache<C> {
             caps.random_write = true;
             caps.truncate = true;
         }
+        // Cache layer can always store mode locally, even if backend doesn't support it
+        // (mode will be preserved in cache and written to backend if supported)
+        caps.set_mode = true;
         caps
     }
 
@@ -415,10 +423,26 @@ impl<C: Connector + 'static> Connector for FilesystemCache<C> {
                 FuseAdapterError::Cache(format!("Failed to stat cache file: {}", e))
             })?;
 
+            // Get cached mode if available
+            let cached_mode = self.mode_cache.get(path).map(|r| *r);
+
             let meta = if std_meta.is_file() {
-                Metadata::file(
-                    std_meta.len(),
+                if let Some(mode) = cached_mode {
+                    Metadata::file_with_mode(
+                        std_meta.len(),
+                        std_meta.modified().unwrap_or(SystemTime::now()),
+                        mode,
+                    )
+                } else {
+                    Metadata::file(
+                        std_meta.len(),
+                        std_meta.modified().unwrap_or(SystemTime::now()),
+                    )
+                }
+            } else if let Some(mode) = cached_mode {
+                Metadata::directory_with_mode(
                     std_meta.modified().unwrap_or(SystemTime::now()),
+                    mode,
                 )
             } else {
                 Metadata::directory(std_meta.modified().unwrap_or(SystemTime::now()))
@@ -430,6 +454,10 @@ impl<C: Connector + 'static> Connector for FilesystemCache<C> {
 
         // Fall through to backend
         let meta = self.inner.stat(path).await?;
+        // Cache mode from backend if present
+        if let Some(mode) = meta.mode {
+            self.mode_cache.insert(path.to_path_buf(), mode);
+        }
         self.cache_metadata(path, meta.clone());
         Ok(meta)
     }
@@ -552,6 +580,11 @@ impl<C: Connector + 'static> Connector for FilesystemCache<C> {
                 self.dirty_files.insert(to.to_path_buf(), state);
             }
 
+            // Preserve mode
+            if let Some((_, mode)) = self.mode_cache.remove(from) {
+                self.mode_cache.insert(to.to_path_buf(), mode);
+            }
+
             // Invalidate metadata
             self.metadata_cache.remove(from);
             self.metadata_cache.remove(to);
@@ -570,6 +603,11 @@ impl<C: Connector + 'static> Connector for FilesystemCache<C> {
         let to_cache = self.cache_path(to);
         std::fs::copy(&from_cache, &to_cache)
             .map_err(|e| FuseAdapterError::Cache(format!("Failed to copy: {}", e)))?;
+
+        // Preserve mode
+        if let Some((_, mode)) = self.mode_cache.remove(from) {
+            self.mode_cache.insert(to.to_path_buf(), mode);
+        }
 
         // Mark destination as dirty
         self.dirty_files.insert(
@@ -618,6 +656,55 @@ impl<C: Connector + 'static> Connector for FilesystemCache<C> {
 
         // Also call backend flush
         self.inner.flush(path).await
+    }
+
+    async fn create_file_with_mode(&self, path: &Path, mode: u32) -> Result<()> {
+        // Store mode in cache
+        self.mode_cache.insert(path.to_path_buf(), mode);
+
+        // Create in local cache
+        self.create_in_cache(path)?;
+
+        // Also create on backend if it supports immediate creates
+        if self.inner.capabilities().write {
+            self.inner.create_file_with_mode(path, mode).await?;
+            // Mark as no longer "new" since it exists on backend
+            if let Some(mut entry) = self.dirty_files.get_mut(path) {
+                entry.is_new = false;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn create_dir_with_mode(&self, path: &Path, mode: u32) -> Result<()> {
+        // Store mode in cache
+        self.mode_cache.insert(path.to_path_buf(), mode);
+
+        // Directories go straight to backend
+        self.inner.create_dir_with_mode(path, mode).await?;
+
+        // Invalidate any cached metadata for parent
+        if let Some(parent) = path.parent() {
+            self.metadata_cache.remove(parent);
+        }
+
+        Ok(())
+    }
+
+    async fn set_mode(&self, path: &Path, mode: u32) -> Result<()> {
+        // Always update local cache
+        self.mode_cache.insert(path.to_path_buf(), mode);
+
+        // Invalidate metadata cache so stat() returns fresh data
+        self.metadata_cache.remove(path);
+
+        // If backend supports set_mode, update it too
+        if self.inner.capabilities().set_mode {
+            self.inner.set_mode(path, mode).await?;
+        }
+
+        Ok(())
     }
 }
 

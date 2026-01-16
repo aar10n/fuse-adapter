@@ -18,12 +18,19 @@ pub enum FileType {
     Directory,
 }
 
+/// Default file mode (rw-r--r--)
+pub const DEFAULT_FILE_MODE: u32 = 0o644;
+/// Default directory mode (rwxr-xr-x)
+pub const DEFAULT_DIR_MODE: u32 = 0o755;
+
 /// Metadata for a file or directory
 #[derive(Debug, Clone)]
 pub struct Metadata {
     pub file_type: FileType,
     pub size: u64,
     pub mtime: SystemTime,
+    /// POSIX permission bits (e.g., 0o644). None means use default.
+    pub mode: Option<u32>,
 }
 
 impl Metadata {
@@ -32,6 +39,16 @@ impl Metadata {
             file_type: FileType::File,
             size,
             mtime,
+            mode: None,
+        }
+    }
+
+    pub fn file_with_mode(size: u64, mtime: SystemTime, mode: u32) -> Self {
+        Self {
+            file_type: FileType::File,
+            size,
+            mtime,
+            mode: Some(mode),
         }
     }
 
@@ -40,7 +57,26 @@ impl Metadata {
             file_type: FileType::Directory,
             size: 0,
             mtime,
+            mode: None,
         }
+    }
+
+    pub fn directory_with_mode(mtime: SystemTime, mode: u32) -> Self {
+        Self {
+            file_type: FileType::Directory,
+            size: 0,
+            mtime,
+            mode: Some(mode),
+        }
+    }
+
+    /// Get the mode, using defaults if not set
+    pub fn mode_or_default(&self) -> u32 {
+        self.mode.unwrap_or(if self.is_dir() {
+            DEFAULT_DIR_MODE
+        } else {
+            DEFAULT_FILE_MODE
+        })
     }
 
     pub fn is_file(&self) -> bool {
@@ -94,6 +130,8 @@ pub struct Capabilities {
     pub set_mtime: bool,
     /// Random access is cheap (hint)
     pub seekable: bool,
+    /// Can store and retrieve POSIX file modes
+    pub set_mode: bool,
 }
 
 impl Capabilities {
@@ -108,6 +146,7 @@ impl Capabilities {
             truncate: true,
             set_mtime: true,
             seekable: true,
+            set_mode: true,
         }
     }
 
@@ -122,6 +161,7 @@ impl Capabilities {
             truncate: false,
             set_mtime: false,
             seekable: true,
+            set_mode: false,
         }
     }
 }
@@ -227,4 +267,27 @@ pub trait Connector: Send + Sync {
 
     /// Flush pending writes for a file
     async fn flush(&self, path: &Path) -> Result<()>;
+
+    /// Create a file with specific mode
+    ///
+    /// Default implementation ignores mode and calls create_file
+    async fn create_file_with_mode(&self, path: &Path, _mode: u32) -> Result<()> {
+        self.create_file(path).await
+    }
+
+    /// Create a directory with specific mode
+    ///
+    /// Default implementation ignores mode and calls create_dir
+    async fn create_dir_with_mode(&self, path: &Path, _mode: u32) -> Result<()> {
+        self.create_dir(path).await
+    }
+
+    /// Set the mode (permissions) of a file or directory
+    ///
+    /// Default implementation returns NotSupported
+    async fn set_mode(&self, _path: &Path, _mode: u32) -> Result<()> {
+        Err(crate::error::FuseAdapterError::NotSupported(
+            "set_mode not supported".to_string(),
+        ))
+    }
 }

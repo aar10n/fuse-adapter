@@ -103,4 +103,16 @@ impl<C: Connector + 'static> Connector for MemoryCache<C> {
     async fn flush(&self, path: &Path) -> Result<()> {
         self.inner.flush(path).await
     }
+
+    async fn create_file_with_mode(&self, path: &Path, mode: u32) -> Result<()> {
+        self.inner.create_file_with_mode(path, mode).await
+    }
+
+    async fn create_dir_with_mode(&self, path: &Path, mode: u32) -> Result<()> {
+        self.inner.create_dir_with_mode(path, mode).await
+    }
+
+    async fn set_mode(&self, path: &Path, mode: u32) -> Result<()> {
+        self.inner.set_mode(path, mode).await
+    }
 }

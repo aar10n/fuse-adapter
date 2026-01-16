@@ -3,8 +3,12 @@
 //! This connector provides access to Amazon S3 or S3-compatible storage
 //! backends (MinIO, LocalStack, etc.).
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
+
+/// S3 metadata key for storing POSIX file mode
+const S3_MODE_METADATA_KEY: &str = "posix-mode";
 
 use async_stream::try_stream;
 use async_trait::async_trait;
@@ -100,6 +104,13 @@ impl S3Connector {
             .unwrap_or(key)
             .to_string()
     }
+
+    /// Create S3 metadata HashMap with mode
+    fn mode_to_metadata(mode: u32) -> HashMap<String, String> {
+        let mut metadata = HashMap::new();
+        metadata.insert(S3_MODE_METADATA_KEY.to_string(), format!("{:o}", mode));
+        metadata
+    }
 }
 
 #[async_trait]
@@ -114,6 +125,7 @@ impl Connector for S3Connector {
             truncate: false,     // Can't truncate in S3
             set_mtime: false,
             seekable: false, // Range requests work but aren't cheap
+            set_mode: true,  // Stored in S3 user metadata
         }
     }
 
@@ -155,7 +167,17 @@ impl Connector for S3Connector {
                     })
                     .unwrap_or(SystemTime::now());
 
-                return Ok(Metadata::file(size, mtime));
+                // Read mode from S3 user metadata
+                let mode = output
+                    .metadata()
+                    .and_then(|m| m.get(S3_MODE_METADATA_KEY))
+                    .and_then(|v| u32::from_str_radix(v, 8).ok());
+
+                return Ok(if let Some(mode) = mode {
+                    Metadata::file_with_mode(size, mtime, mode)
+                } else {
+                    Metadata::file(size, mtime)
+                });
             }
             Err(e) => {
                 // Check if it's a "not found" error
@@ -526,6 +548,72 @@ impl Connector for S3Connector {
 
     async fn flush(&self, _path: &Path) -> Result<()> {
         // S3 writes are immediately durable
+        Ok(())
+    }
+
+    async fn create_file_with_mode(&self, path: &Path, mode: u32) -> Result<()> {
+        let key = self.path_to_key(path);
+        debug!("create_file_with_mode: path={:?} key={} mode={:o}", path, key, mode);
+
+        self.client
+            .put_object()
+            .bucket(&self.bucket)
+            .key(&key)
+            .body(ByteStream::from(Vec::new()))
+            .set_metadata(Some(Self::mode_to_metadata(mode)))
+            .send()
+            .await
+            .map_err(|e| {
+                FuseAdapterError::Backend(format!("S3 PutObject error: {}", e))
+            })?;
+
+        Ok(())
+    }
+
+    async fn create_dir_with_mode(&self, path: &Path, mode: u32) -> Result<()> {
+        let mut key = self.path_to_key(path);
+        if !key.ends_with('/') {
+            key.push('/');
+        }
+
+        debug!("create_dir_with_mode: path={:?} key={} mode={:o}", path, key, mode);
+
+        self.client
+            .put_object()
+            .bucket(&self.bucket)
+            .key(&key)
+            .body(ByteStream::from(Vec::new()))
+            .set_metadata(Some(Self::mode_to_metadata(mode)))
+            .send()
+            .await
+            .map_err(|e| {
+                FuseAdapterError::Backend(format!("S3 PutObject error: {}", e))
+            })?;
+
+        Ok(())
+    }
+
+    async fn set_mode(&self, path: &Path, mode: u32) -> Result<()> {
+        let key = self.path_to_key(path);
+        debug!("set_mode: path={:?} key={} mode={:o}", path, key, mode);
+
+        // S3 doesn't allow updating metadata in place, so we need to copy the object
+        // to itself with new metadata
+        let copy_source = format!("{}/{}", self.bucket, key);
+
+        self.client
+            .copy_object()
+            .bucket(&self.bucket)
+            .key(&key)
+            .copy_source(&copy_source)
+            .metadata_directive(aws_sdk_s3::types::MetadataDirective::Replace)
+            .set_metadata(Some(Self::mode_to_metadata(mode)))
+            .send()
+            .await
+            .map_err(|e| {
+                FuseAdapterError::Backend(format!("S3 CopyObject error: {}", e))
+            })?;
+
         Ok(())
     }
 }
