@@ -12,6 +12,8 @@ jobs:
   build-linux:
     name: Build Linux amd64
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,34 +32,13 @@ jobs:
       - name: Strip binary
         run: strip target/release/fuse-adapter
 
-      - name: Create tarball
-        run: |
-          mkdir -p dist
-          cp target/release/fuse-adapter dist/
-          cp README.md LICENSE dist/ 2>/dev/null || true
-          cd dist
-          tar -czvf ../fuse-adapter-linux-amd64.tar.gz *
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: fuse-adapter-linux-amd64
-          path: fuse-adapter-linux-amd64.tar.gz
-
-  release:
-    name: Create Release
-    needs: build-linux
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: fuse-adapter-linux-amd64
+      - name: Rename binary
+        run: mv target/release/fuse-adapter target/release/fuse-adapter-linux-amd64
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: fuse-adapter-linux-amd64.tar.gz
+          files: target/release/fuse-adapter-linux-amd64
           generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
