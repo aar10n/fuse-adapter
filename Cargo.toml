@@ -1,6 +1,6 @@
 [package]
 name = "fuse-adapter"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "A FUSE filesystem framework with pluggable connector architecture"
 license = "MIT"
@@ -38,7 +38,8 @@ aws-config = { version = "1", features = ["behavior-version-latest"] }
 # Google Drive
 google-drive3 = "6"
 hyper = "1"
-hyper-rustls = { version = "0.27", features = ["http2"] }
+hyper-rustls = { version = "0.27", features = ["http2", "ring", "native-tokio"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "http1", "http2", "tokio"] }
 http-body-util = "0.1"
 chrono = "0.4"
