@@ -78,22 +78,15 @@ mounts:
     cache:
       type: none
 
-  # --- Database connector (not yet implemented) ---
-  # - path: /mnt/db-files
-  #   connector:
-  #     type: database
-  #     connection_string: postgres://user:pass@localhost/files
-  #     table: file_storage
-  #   cache:
-  #     type: memory
-  #     max_entries: 500
-
-  # --- Google Drive connector (not yet implemented) ---
+  # --- Google Drive connector ---
+  # Uses OAuth2 service account credentials from a JSON file.
+  # To set up: Create a service account in Google Cloud Console, enable Drive API,
+  # and download the credentials JSON. Share the target folder with the service account email.
   # - path: /mnt/gdrive
   #   connector:
   #     type: gdrive
-  #     credentials_path: /etc/fuse-adapter/gdrive-creds.json
-  #     root_folder_id: "abc123def456"
+  #     credentials_path: /etc/fuse-adapter/gdrive-service-account.json
+  #     root_folder_id: "1ABC123DEF456_folder_id_from_drive_url"
   #   cache:
   #     type: filesystem
   #     path: /var/cache/fuse-adapter/gdrive

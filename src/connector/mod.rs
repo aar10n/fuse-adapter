@@ -1,3 +1,4 @@
+pub mod gdrive;
 pub mod s3;
 
 use std::ffi::OsString;

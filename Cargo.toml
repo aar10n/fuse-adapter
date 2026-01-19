@@ -35,6 +35,14 @@ dashmap = "5"
 aws-sdk-s3 = "1"
 aws-config = { version = "1", features = ["behavior-version-latest"] }
 
+# Google Drive
+google-drive3 = "6"
+hyper = "1"
+hyper-rustls = { version = "0.27", features = ["http2"] }
+hyper-util = { version = "0.1", features = ["client-legacy", "http1", "http2", "tokio"] }
+http-body-util = "0.1"
+chrono = "0.4"
+
 # Time handling
 humantime-serde = "1"
 

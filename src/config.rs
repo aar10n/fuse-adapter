@@ -32,9 +32,6 @@ pub struct ConnectorDefaults {
     /// S3 connector defaults
     pub s3: Option<S3ConnectorDefaults>,
 
-    /// Database connector defaults
-    pub database: Option<DatabaseConnectorDefaults>,
-
     /// Google Drive connector defaults
     pub gdrive: Option<GDriveConnectorDefaults>,
 }
@@ -58,20 +55,11 @@ pub struct S3ConnectorDefaults {
     #[serde(default)]
     pub force_path_style: bool,
 
+    /// Mount as read-only by default (disables all write operations)
+    #[serde(default)]
+    pub read_only: bool,
+
     /// Default cache configuration for S3 mounts
-    pub cache: Option<CacheConfig>,
-}
-
-/// Database connector defaults
-#[derive(Debug, Clone, Deserialize)]
-pub struct DatabaseConnectorDefaults {
-    /// Database connection string
-    pub connection_string: String,
-
-    /// Table name for file storage
-    pub table: Option<String>,
-
-    /// Default cache configuration
     pub cache: Option<CacheConfig>,
 }
 
@@ -109,10 +97,6 @@ pub enum MountConnectorConfig {
     /// S3 connector
     S3(S3MountConnectorConfig),
 
-    /// Database connector
-    #[serde(rename = "database")]
-    Database(DatabaseMountConnectorConfig),
-
     /// Google Drive connector
     #[serde(rename = "gdrive")]
     GDrive(GDriveMountConnectorConfig),
@@ -135,16 +119,9 @@ pub struct S3MountConnectorConfig {
 
     /// Force path-style addressing
     pub force_path_style: Option<bool>,
-}
 
-/// Database mount connector - all fields optional
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct DatabaseMountConnectorConfig {
-    /// Database connection string
-    pub connection_string: Option<String>,
-
-    /// Table name for file storage
-    pub table: Option<String>,
+    /// Mount as read-only (disables all write operations)
+    pub read_only: Option<bool>,
 }
 
 /// Google Drive mount connector - all fields optional
@@ -210,9 +187,6 @@ pub enum ConnectorConfig {
     /// S3 connector
     S3(S3ConnectorConfig),
 
-    /// Database connector
-    Database(DatabaseConnectorConfig),
-
     /// Google Drive connector
     GDrive(GDriveConnectorConfig),
 }
@@ -234,16 +208,9 @@ pub struct S3ConnectorConfig {
 
     /// Force path-style addressing (for MinIO, LocalStack, etc.)
     pub force_path_style: bool,
-}
 
-/// Database connector configuration (fully resolved)
-#[derive(Debug, Clone)]
-pub struct DatabaseConnectorConfig {
-    /// Database connection string
-    pub connection_string: String,
-
-    /// Table name for file storage
-    pub table: Option<String>,
+    /// Mount as read-only (disables all write operations)
+    pub read_only: bool,
 }
 
 /// Google Drive connector configuration (fully resolved)
@@ -297,16 +264,6 @@ impl RawConfig {
                     cache,
                 })
             }
-            MountConnectorConfig::Database(mount_db) => {
-                let resolved_connector =
-                    Self::resolve_database_connector(connectors, mount_db, &raw.path)?;
-                let cache = Self::resolve_database_cache(connectors, &raw.cache);
-                Ok(MountConfig {
-                    path: raw.path,
-                    connector: ConnectorConfig::Database(resolved_connector),
-                    cache,
-                })
-            }
             MountConnectorConfig::GDrive(mount_gdrive) => {
                 let resolved_connector =
                     Self::resolve_gdrive_connector(connectors, mount_gdrive, &raw.path)?;
@@ -325,35 +282,35 @@ impl RawConfig {
         mount: S3MountConnectorConfig,
         mount_path: &PathBuf,
     ) -> Result<S3ConnectorConfig, ConfigError> {
-        // Check if this is full config mode (has bucket) or override mode
-        if let Some(bucket) = mount.bucket {
-            // Full config mode - no defaults needed
-            Ok(S3ConnectorConfig {
-                bucket,
-                region: mount.region,
-                prefix: mount.prefix,
-                endpoint: mount.endpoint,
-                force_path_style: mount.force_path_style.unwrap_or(false),
-            })
-        } else {
-            // Override mode - require defaults
-            let defaults = connectors.s3.as_ref().ok_or_else(|| {
+        let defaults = connectors.s3.as_ref();
+
+        // Mount values override defaults; bucket must be specified somewhere
+        let bucket = mount
+            .bucket
+            .or_else(|| defaults.map(|d| d.bucket.clone()))
+            .ok_or_else(|| {
                 ConfigError::ValidationError(format!(
-                    "Mount {:?} uses S3 connector without bucket; requires connectors.s3 defaults",
+                    "Mount {:?} uses S3 connector but no bucket specified (either on mount or in connectors.s3 defaults)",
                     mount_path
                 ))
             })?;
 
-            Ok(S3ConnectorConfig {
-                bucket: defaults.bucket.clone(),
-                region: mount.region.or_else(|| defaults.region.clone()),
-                prefix: mount.prefix.or_else(|| defaults.prefix.clone()),
-                endpoint: mount.endpoint.or_else(|| defaults.endpoint.clone()),
-                force_path_style: mount
-                    .force_path_style
-                    .unwrap_or(defaults.force_path_style),
-            })
-        }
+        Ok(S3ConnectorConfig {
+            bucket,
+            region: mount.region.or_else(|| defaults.and_then(|d| d.region.clone())),
+            prefix: mount.prefix.or_else(|| defaults.and_then(|d| d.prefix.clone())),
+            endpoint: mount
+                .endpoint
+                .or_else(|| defaults.and_then(|d| d.endpoint.clone())),
+            force_path_style: mount
+                .force_path_style
+                .or_else(|| defaults.map(|d| d.force_path_style))
+                .unwrap_or(false),
+            read_only: mount
+                .read_only
+                .or_else(|| defaults.map(|d| d.read_only))
+                .unwrap_or(false),
+        })
     }
 
     fn resolve_s3_cache(
@@ -372,82 +329,39 @@ impl RawConfig {
         CacheConfig::None
     }
 
-    fn resolve_database_connector(
-        connectors: &ConnectorDefaults,
-        mount: DatabaseMountConnectorConfig,
-        mount_path: &PathBuf,
-    ) -> Result<DatabaseConnectorConfig, ConfigError> {
-        if let Some(connection_string) = mount.connection_string {
-            // Full config mode
-            Ok(DatabaseConnectorConfig {
-                connection_string,
-                table: mount.table,
-            })
-        } else {
-            // Override mode
-            let defaults = connectors.database.as_ref().ok_or_else(|| {
-                ConfigError::ValidationError(format!(
-                    "Mount {:?} uses Database connector without connection_string; requires connectors.database defaults",
-                    mount_path
-                ))
-            })?;
-
-            Ok(DatabaseConnectorConfig {
-                connection_string: defaults.connection_string.clone(),
-                table: mount.table.or_else(|| defaults.table.clone()),
-            })
-        }
-    }
-
-    fn resolve_database_cache(
-        connectors: &ConnectorDefaults,
-        mount_cache: &Option<CacheConfig>,
-    ) -> CacheConfig {
-        if let Some(cache) = mount_cache {
-            return cache.clone();
-        }
-        if let Some(db_defaults) = &connectors.database {
-            if let Some(cache) = &db_defaults.cache {
-                return cache.clone();
-            }
-        }
-        CacheConfig::None
-    }
-
     fn resolve_gdrive_connector(
         connectors: &ConnectorDefaults,
         mount: GDriveMountConnectorConfig,
         mount_path: &PathBuf,
     ) -> Result<GDriveConnectorConfig, ConfigError> {
-        if let Some(credentials_path) = mount.credentials_path {
-            // Full config mode - need root_folder_id too
-            let root_folder_id = mount.root_folder_id.ok_or_else(|| {
+        let defaults = connectors.gdrive.as_ref();
+
+        // Mount values override defaults; credentials_path must be specified somewhere
+        let credentials_path = mount
+            .credentials_path
+            .or_else(|| defaults.map(|d| d.credentials_path.clone()))
+            .ok_or_else(|| {
                 ConfigError::ValidationError(format!(
-                    "Mount {:?} has credentials_path but missing root_folder_id",
-                    mount_path
-                ))
-            })?;
-            Ok(GDriveConnectorConfig {
-                credentials_path,
-                root_folder_id,
-            })
-        } else {
-            // Override mode
-            let defaults = connectors.gdrive.as_ref().ok_or_else(|| {
-                ConfigError::ValidationError(format!(
-                    "Mount {:?} uses GDrive connector without credentials_path; requires connectors.gdrive defaults",
+                    "Mount {:?} uses GDrive connector but no credentials_path specified (either on mount or in connectors.gdrive defaults)",
                     mount_path
                 ))
             })?;
 
-            Ok(GDriveConnectorConfig {
-                credentials_path: defaults.credentials_path.clone(),
-                root_folder_id: mount
-                    .root_folder_id
-                    .clone()
-                    .unwrap_or_else(|| defaults.root_folder_id.clone()),
-            })
-        }
+        // root_folder_id must also be specified somewhere
+        let root_folder_id = mount
+            .root_folder_id
+            .or_else(|| defaults.map(|d| d.root_folder_id.clone()))
+            .ok_or_else(|| {
+                ConfigError::ValidationError(format!(
+                    "Mount {:?} uses GDrive connector but no root_folder_id specified (either on mount or in connectors.gdrive defaults)",
+                    mount_path
+                ))
+            })?;
+
+        Ok(GDriveConnectorConfig {
+            credentials_path,
+            root_folder_id,
+        })
     }
 
     fn resolve_gdrive_cache(
@@ -508,14 +422,6 @@ impl Config {
                     if s3.bucket.is_empty() {
                         return Err(ConfigError::ValidationError(format!(
                             "Mount {:?}: S3 bucket cannot be empty",
-                            mount.path
-                        )));
-                    }
-                }
-                ConnectorConfig::Database(db) => {
-                    if db.connection_string.is_empty() {
-                        return Err(ConfigError::ValidationError(format!(
-                            "Mount {:?}: Database connection_string cannot be empty",
                             mount.path
                         )));
                     }
@@ -665,8 +571,8 @@ mounts:
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
-            err.to_string().contains("requires connectors.s3 defaults"),
-            "Error should mention missing defaults: {}",
+            err.to_string().contains("no bucket specified"),
+            "Error should mention missing bucket: {}",
             err
         );
     }
@@ -714,11 +620,84 @@ mounts:
             _ => panic!("Expected S3 connector"),
         }
 
-        // Second uses full config (ignores defaults)
+        // Second overrides bucket and region from defaults
         match &config.mounts[1].connector {
             ConnectorConfig::S3(s3) => {
                 assert_eq!(s3.bucket, "custom-bucket");
                 assert_eq!(s3.region, Some("eu-west-1".to_string()));
+            }
+            _ => panic!("Expected S3 connector"),
+        }
+    }
+
+    #[test]
+    fn test_different_bucket_inherits_other_settings() {
+        // Test that specifying a different bucket still inherits endpoint, force_path_style, etc.
+        let yaml = r#"
+connectors:
+  s3:
+    bucket: default-bucket
+    region: us-west-2
+    endpoint: "http://minio:9000"
+    force_path_style: true
+
+mounts:
+  - path: /mnt/other-bucket
+    connector:
+      type: s3
+      bucket: other-bucket
+"#;
+
+        let config = Config::from_str(yaml).unwrap();
+        assert_eq!(config.mounts.len(), 1);
+
+        match &config.mounts[0].connector {
+            ConnectorConfig::S3(s3) => {
+                assert_eq!(s3.bucket, "other-bucket"); // overridden
+                assert_eq!(s3.region, Some("us-west-2".to_string())); // inherited
+                assert_eq!(s3.endpoint, Some("http://minio:9000".to_string())); // inherited
+                assert!(s3.force_path_style); // inherited
+            }
+            _ => panic!("Expected S3 connector"),
+        }
+    }
+
+    #[test]
+    fn test_read_only_mount() {
+        // Test read_only can be set at mount level and inherits from defaults
+        let yaml = r#"
+connectors:
+  s3:
+    bucket: default-bucket
+    read_only: true
+
+mounts:
+  - path: /mnt/readonly
+    connector:
+      type: s3
+      prefix: "ro/"
+  - path: /mnt/writable
+    connector:
+      type: s3
+      prefix: "rw/"
+      read_only: false
+"#;
+
+        let config = Config::from_str(yaml).unwrap();
+        assert_eq!(config.mounts.len(), 2);
+
+        // First mount inherits read_only from defaults
+        match &config.mounts[0].connector {
+            ConnectorConfig::S3(s3) => {
+                assert!(s3.read_only);
+            }
+            _ => panic!("Expected S3 connector"),
+        }
+
+        // Second mount overrides read_only to false
+        match &config.mounts[1].connector {
+            ConnectorConfig::S3(s3) => {
+                assert!(!s3.read_only);
             }
             _ => panic!("Expected S3 connector"),
         }

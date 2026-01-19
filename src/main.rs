@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
 
 use fuse_adapter::cache::filesystem::{FilesystemCache, FilesystemCacheConfig};
@@ -12,6 +12,7 @@ use fuse_adapter::cache::memory::{MemoryCache, MemoryCacheConfig};
 use fuse_adapter::cache::none::NoCache;
 use fuse_adapter::cache::CacheConfig;
 use fuse_adapter::config::{Config, ConnectorConfig};
+use fuse_adapter::connector::gdrive::GDriveConnector;
 use fuse_adapter::connector::s3::S3Connector;
 use fuse_adapter::connector::Connector;
 use fuse_adapter::mount::MountManager;
@@ -91,13 +92,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let s3 = S3Connector::new(s3_config.clone()).await?;
                 wrap_with_cache(s3, &mount_config.cache)?
             }
-            ConnectorConfig::Database(_) => {
-                warn!("Database connector not yet implemented, skipping mount");
-                continue;
-            }
-            ConnectorConfig::GDrive(_) => {
-                warn!("Google Drive connector not yet implemented, skipping mount");
-                continue;
+            ConnectorConfig::GDrive(gdrive_config) => {
+                let gdrive = GDriveConnector::new(gdrive_config.clone()).await?;
+                wrap_with_cache(gdrive, &mount_config.cache)?
             }
         };
 

@@ -1,6 +1,6 @@
 # fuse-adapter
 
-A FUSE filesystem framework in Rust with a pluggable connector architecture. Mount various storage backends (S3, databases, cloud drives) as local filesystems.
+A FUSE filesystem framework in Rust with a pluggable connector architecture. Mount various storage backends (S3, Google Drive, etc.) as local filesystems.
 
 ## Features
 
@@ -17,8 +17,8 @@ A FUSE filesystem framework in Rust with a pluggable connector architecture. Mou
 │                fuse-adapter daemon              │
 │  ┌───────────┐  ┌───────────┐  ┌───────────┐    │
 │  │  Mount 1  │  │  Mount 2  │  │  Mount 3  │    │
-│  │  /data    │  │  /skills  │  │  /mydrive │    │
-│  │  S3Conn   │  │  DbConn   │  │  GDriveC  │    │
+│  │  /data    │  │  /import  │  │  /mydrive │    │
+│  │  S3Conn   │  │  S3Conn   │  │  GDriveC  │    │
 │  │  +Cache   │  │  (ro)     │  │  +Cache   │    │
 │  └───────────┘  └───────────┘  └───────────┘    │
 │                                                 │
@@ -131,13 +131,39 @@ connector:
   force_path_style: true             # For MinIO, LocalStack
 ```
 
-### Database Connector (Planned)
+### Google Drive Connector
 
-Store files in a database with content-addressed storage.
+Mount Google Drive folders as local filesystems using service account authentication.
 
-### Google Drive Connector (Planned)
+**Capabilities:**
+- Read: ✓
+- Write: ✓ (requires cache layer for random writes)
+- Range reads: ✗
+- Random write: ✗ (handled by cache)
+- Rename: ✓
+- Truncate: ✗ (handled by cache)
 
-Mount Google Drive folders as local filesystems.
+**Configuration:**
+```yaml
+connectors:
+  gdrive:
+    credentials_path: /etc/fuse-adapter/gdrive-service-account.json
+    root_folder_id: "1ABC123DEF456_folder_id"
+
+mounts:
+  - path: /mnt/gdrive
+    connector:
+      type: gdrive
+    cache:
+      type: filesystem
+      path: /var/cache/fuse-adapter/gdrive
+```
+
+**Setup:**
+1. Create a service account in Google Cloud Console
+2. Enable the Google Drive API
+3. Download the credentials JSON file
+4. Share the target Drive folder with the service account email
 
 ## Cache Layers
 
@@ -236,7 +262,8 @@ fuse-adapter/
 │   ├── mount.rs
 │   ├── connector/
 │   │   ├── mod.rs
-│   │   └── s3.rs
+│   │   ├── s3.rs
+│   │   └── gdrive.rs
 │   ├── cache/
 │   │   ├── mod.rs
 │   │   ├── none.rs

@@ -7,6 +7,7 @@
 .PHONY: localstack-start localstack-stop localstack-setup localstack-logs
 .PHONY: run-s3 run-s3-localstack
 .PHONY: mount-dirs unmount test-s3 test-read test-write
+.PHONY: test-integration test-integration-quick test-integration-ci
 
 # Configuration
 MINIO_CONTAINER := fuse-adapter-minio
@@ -50,6 +51,9 @@ help: ## Show this help
 	@echo ""
 	@echo "Test:"
 	@grep -E '^test-.*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "Integration Tests:"
+	@grep -E '^test-(integration|all):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Utilities:"
 	@grep -E '^(mount-dirs|unmount):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2}'
@@ -280,3 +284,22 @@ quickstart: ## Full setup: start MinIO, create bucket, build, and run
 
 stop-all: unmount minio-stop localstack-stop ## Stop everything
 	@echo "$(GREEN)All services stopped$(NC)"
+
+#-----------------------------------------------------------------------------
+# Integration Tests
+#-----------------------------------------------------------------------------
+
+test-integration: ## Run full integration test suite
+	@echo "$(GREEN)Running integration tests...$(NC)"
+	./scripts/test-harness.sh
+
+test-integration-quick: ## Run quick integration smoke tests
+	@echo "$(GREEN)Running quick integration tests...$(NC)"
+	./scripts/test-harness.sh --quick
+
+test-integration-ci: ## Run integration tests in CI mode (MinIO already running)
+	@echo "$(GREEN)Running integration tests (CI mode)...$(NC)"
+	./scripts/test-harness.sh --ci
+
+test-all: test test-integration ## Run all tests (unit + integration)
+	@echo "$(GREEN)All tests complete!$(NC)"

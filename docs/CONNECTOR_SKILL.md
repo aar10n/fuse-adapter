@@ -1,6 +1,6 @@
 # Implementing a New Connector for fuse-adapter
 
-This guide explains how to implement a new storage connector for fuse-adapter. Connectors are the backend storage implementations that provide access to various data sources (S3, databases, cloud drives, etc.).
+This guide explains how to implement a new storage connector for fuse-adapter. Connectors are the backend storage implementations that provide access to various data sources (S3, Google Drive, etc.).
 
 ## Architecture Overview
 
@@ -298,7 +298,6 @@ Add it to the `ConnectorConfig` enum:
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum ConnectorConfig {
     S3(S3ConnectorConfig),
-    Database(DatabaseConnectorConfig),
     GDrive(GDriveConnectorConfig),
     MyBackend(MyBackendConfig),  // Add your config
 }
