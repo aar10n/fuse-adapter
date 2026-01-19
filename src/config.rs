@@ -88,6 +88,10 @@ pub struct GDriveConnectorDefaults {
     /// Root folder ID (defaults to "root" for My Drive)
     pub root_folder_id: Option<String>,
 
+    /// Mount as read-only (disables all write operations)
+    #[serde(default)]
+    pub read_only: bool,
+
     /// Default cache configuration
     pub cache: Option<CacheConfig>,
 }
@@ -175,6 +179,9 @@ pub struct GDriveMountConnectorConfig {
 
     /// Root folder ID (defaults to "root" for My Drive)
     pub root_folder_id: Option<String>,
+
+    /// Mount as read-only (disables all write operations)
+    pub read_only: Option<bool>,
 }
 
 // =============================================================================
@@ -267,6 +274,9 @@ pub struct GDriveConnectorConfig {
 
     /// Root folder ID (defaults to "root" for My Drive)
     pub root_folder_id: String,
+
+    /// Mount as read-only (disables all write operations)
+    pub read_only: bool,
 }
 
 /// Resolved authentication configuration for Google Drive.
@@ -445,9 +455,15 @@ impl RawConfig {
             .or_else(|| defaults.and_then(|d| d.root_folder_id.clone()))
             .unwrap_or_else(|| "root".to_string());
 
+        let read_only = mount
+            .read_only
+            .or_else(|| defaults.map(|d| d.read_only))
+            .unwrap_or(false);
+
         Ok(GDriveConnectorConfig {
             auth,
             root_folder_id,
+            read_only,
         })
     }
 
