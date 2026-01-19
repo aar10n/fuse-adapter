@@ -5,6 +5,18 @@ use std::path::PathBuf;
 use serde::Deserialize;
 
 use crate::cache::CacheConfig;
+use crate::env::substitute_env_vars;
+
+/// Error handling mode for connector failures during startup
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorMode {
+    /// Log errors but continue running with remaining successful mounts
+    #[default]
+    Continue,
+    /// Exit with error code on first connector failure
+    Exit,
+}
 
 // =============================================================================
 // Raw Config (Deserialized from YAML)
@@ -17,6 +29,10 @@ pub struct RawConfig {
     /// Logging configuration
     #[serde(default)]
     pub logging: LoggingConfig,
+
+    /// Error handling mode for connector failures
+    #[serde(default)]
+    pub error_mode: ErrorMode,
 
     /// Top-level connector defaults
     #[serde(default)]
@@ -66,14 +82,41 @@ pub struct S3ConnectorDefaults {
 /// Google Drive connector defaults
 #[derive(Debug, Clone, Deserialize)]
 pub struct GDriveConnectorDefaults {
-    /// Path to credentials JSON file
-    pub credentials_path: PathBuf,
+    /// Authentication configuration
+    pub auth: Option<RawGDriveAuthConfig>,
 
-    /// Root folder ID in Google Drive
-    pub root_folder_id: String,
+    /// Root folder ID (defaults to "root" for My Drive)
+    pub root_folder_id: Option<String>,
 
     /// Default cache configuration
     pub cache: Option<CacheConfig>,
+}
+
+/// Raw authentication configuration for Google Drive (deserialized from YAML).
+/// Environment variable substitution is applied during resolution.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RawGDriveAuthConfig {
+    /// Service account credentials file
+    ServiceAccount {
+        /// Path to the service account JSON credentials file
+        credentials_path: String,
+    },
+    /// HTTP-based token provider with arbitrary headers
+    Http {
+        /// Token endpoint URL
+        endpoint: String,
+        /// HTTP method (GET, POST, etc.). Defaults to GET.
+        method: Option<String>,
+        /// HTTP headers to send with token requests (supports env var substitution)
+        #[serde(default)]
+        headers: std::collections::HashMap<String, String>,
+    },
+    /// Static access token (for testing)
+    Token {
+        /// The access token to use
+        access_token: String,
+    },
 }
 
 /// Raw mount configuration before resolution
@@ -127,10 +170,10 @@ pub struct S3MountConnectorConfig {
 /// Google Drive mount connector - all fields optional
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct GDriveMountConnectorConfig {
-    /// Path to credentials JSON file
-    pub credentials_path: Option<PathBuf>,
+    /// Authentication configuration (overrides default if present)
+    pub auth: Option<RawGDriveAuthConfig>,
 
-    /// Root folder ID in Google Drive
+    /// Root folder ID (defaults to "root" for My Drive)
     pub root_folder_id: Option<String>,
 }
 
@@ -143,6 +186,9 @@ pub struct GDriveMountConnectorConfig {
 pub struct Config {
     /// Logging configuration
     pub logging: LoggingConfig,
+
+    /// Error handling mode for connector failures
+    pub error_mode: ErrorMode,
 
     /// Mount points (fully resolved)
     pub mounts: Vec<MountConfig>,
@@ -216,11 +262,36 @@ pub struct S3ConnectorConfig {
 /// Google Drive connector configuration (fully resolved)
 #[derive(Debug, Clone)]
 pub struct GDriveConnectorConfig {
-    /// Path to credentials JSON file
-    pub credentials_path: PathBuf,
+    /// Authentication configuration
+    pub auth: GDriveAuthConfig,
 
-    /// Root folder ID in Google Drive
+    /// Root folder ID (defaults to "root" for My Drive)
     pub root_folder_id: String,
+}
+
+/// Resolved authentication configuration for Google Drive.
+/// Environment variables have been substituted.
+#[derive(Debug, Clone)]
+pub enum GDriveAuthConfig {
+    /// Service account credentials file
+    ServiceAccount {
+        /// Path to the service account JSON credentials file
+        credentials_path: PathBuf,
+    },
+    /// HTTP-based token provider with arbitrary headers
+    Http {
+        /// Token endpoint URL
+        endpoint: String,
+        /// HTTP method (GET, POST, etc.)
+        method: String,
+        /// HTTP headers to send with token requests
+        headers: std::collections::HashMap<String, String>,
+    },
+    /// Static access token (for testing)
+    Token {
+        /// The access token to use
+        access_token: String,
+    },
 }
 
 // =============================================================================
@@ -232,6 +303,7 @@ impl RawConfig {
     pub fn resolve(self) -> Result<Config, ConfigError> {
         let RawConfig {
             logging,
+            error_mode,
             connectors,
             mounts,
         } = self;
@@ -245,6 +317,7 @@ impl RawConfig {
 
         Ok(Config {
             logging,
+            error_mode,
             mounts: resolved_mounts,
         })
     }
@@ -295,13 +368,29 @@ impl RawConfig {
                 ))
             })?;
 
+        // Apply environment variable substitution to string fields
+        let bucket = substitute_env_vars(&bucket)?;
+        let region = mount
+            .region
+            .or_else(|| defaults.and_then(|d| d.region.clone()))
+            .map(|r| substitute_env_vars(&r))
+            .transpose()?;
+        let prefix = mount
+            .prefix
+            .or_else(|| defaults.and_then(|d| d.prefix.clone()))
+            .map(|p| substitute_env_vars(&p))
+            .transpose()?;
+        let endpoint = mount
+            .endpoint
+            .or_else(|| defaults.and_then(|d| d.endpoint.clone()))
+            .map(|e| substitute_env_vars(&e))
+            .transpose()?;
+
         Ok(S3ConnectorConfig {
             bucket,
-            region: mount.region.or_else(|| defaults.and_then(|d| d.region.clone())),
-            prefix: mount.prefix.or_else(|| defaults.and_then(|d| d.prefix.clone())),
-            endpoint: mount
-                .endpoint
-                .or_else(|| defaults.and_then(|d| d.endpoint.clone())),
+            region,
+            prefix,
+            endpoint,
             force_path_style: mount
                 .force_path_style
                 .or_else(|| defaults.map(|d| d.force_path_style))
@@ -336,32 +425,65 @@ impl RawConfig {
     ) -> Result<GDriveConnectorConfig, ConfigError> {
         let defaults = connectors.gdrive.as_ref();
 
-        // Mount values override defaults; credentials_path must be specified somewhere
-        let credentials_path = mount
-            .credentials_path
-            .or_else(|| defaults.map(|d| d.credentials_path.clone()))
+        // Mount auth overrides default auth; auth must be specified somewhere
+        let raw_auth = mount
+            .auth
+            .or_else(|| defaults.and_then(|d| d.auth.clone()))
             .ok_or_else(|| {
                 ConfigError::ValidationError(format!(
-                    "Mount {:?} uses GDrive connector but no credentials_path specified (either on mount or in connectors.gdrive defaults)",
+                    "Mount {:?} uses GDrive connector but no auth specified (either on mount or in connectors.gdrive defaults)",
                     mount_path
                 ))
             })?;
 
-        // root_folder_id must also be specified somewhere
+        // Resolve auth with environment variable substitution
+        let auth = Self::resolve_gdrive_auth(raw_auth)?;
+
+        // root_folder_id defaults to "root" (My Drive)
         let root_folder_id = mount
             .root_folder_id
-            .or_else(|| defaults.map(|d| d.root_folder_id.clone()))
-            .ok_or_else(|| {
-                ConfigError::ValidationError(format!(
-                    "Mount {:?} uses GDrive connector but no root_folder_id specified (either on mount or in connectors.gdrive defaults)",
-                    mount_path
-                ))
-            })?;
+            .or_else(|| defaults.and_then(|d| d.root_folder_id.clone()))
+            .unwrap_or_else(|| "root".to_string());
 
         Ok(GDriveConnectorConfig {
-            credentials_path,
+            auth,
             root_folder_id,
         })
+    }
+
+    fn resolve_gdrive_auth(raw: RawGDriveAuthConfig) -> Result<GDriveAuthConfig, ConfigError> {
+        match raw {
+            RawGDriveAuthConfig::ServiceAccount { credentials_path } => {
+                let resolved_path = substitute_env_vars(&credentials_path)?;
+                Ok(GDriveAuthConfig::ServiceAccount {
+                    credentials_path: PathBuf::from(resolved_path),
+                })
+            }
+            RawGDriveAuthConfig::Http {
+                endpoint,
+                method,
+                headers,
+            } => {
+                let endpoint = substitute_env_vars(&endpoint)?;
+                let method = method.unwrap_or_else(|| "GET".to_string());
+
+                // Substitute env vars in all header values
+                let mut resolved_headers = std::collections::HashMap::new();
+                for (key, value) in headers {
+                    resolved_headers.insert(key, substitute_env_vars(&value)?);
+                }
+
+                Ok(GDriveAuthConfig::Http {
+                    endpoint,
+                    method,
+                    headers: resolved_headers,
+                })
+            }
+            RawGDriveAuthConfig::Token { access_token } => {
+                let access_token = substitute_env_vars(&access_token)?;
+                Ok(GDriveAuthConfig::Token { access_token })
+            }
+        }
     }
 
     fn resolve_gdrive_cache(
@@ -426,13 +548,8 @@ impl Config {
                         )));
                     }
                 }
-                ConnectorConfig::GDrive(gdrive) => {
-                    if gdrive.root_folder_id.is_empty() {
-                        return Err(ConfigError::ValidationError(format!(
-                            "Mount {:?}: GDrive root_folder_id cannot be empty",
-                            mount.path
-                        )));
-                    }
+                ConnectorConfig::GDrive(_) => {
+                    // No validation needed - root_folder_id defaults to "root"
                 }
             }
         }
@@ -581,6 +698,7 @@ mounts:
     fn test_validate_empty_mounts() {
         let config = Config {
             logging: LoggingConfig::default(),
+            error_mode: ErrorMode::default(),
             mounts: vec![],
         };
 
@@ -701,5 +819,284 @@ mounts:
             }
             _ => panic!("Expected S3 connector"),
         }
+    }
+
+    #[test]
+    fn test_gdrive_service_account_auth() {
+        let yaml = r#"
+mounts:
+  - path: /mnt/gdrive
+    connector:
+      type: gdrive
+      root_folder_id: "folder123"
+      auth:
+        type: service_account
+        credentials_path: "/path/to/creds.json"
+"#;
+
+        let config = Config::from_str(yaml).unwrap();
+        assert_eq!(config.mounts.len(), 1);
+
+        match &config.mounts[0].connector {
+            ConnectorConfig::GDrive(gdrive) => {
+                assert_eq!(gdrive.root_folder_id, "folder123");
+                match &gdrive.auth {
+                    GDriveAuthConfig::ServiceAccount { credentials_path } => {
+                        assert_eq!(credentials_path, &PathBuf::from("/path/to/creds.json"));
+                    }
+                    _ => panic!("Expected ServiceAccount auth"),
+                }
+            }
+            _ => panic!("Expected GDrive connector"),
+        }
+    }
+
+    #[test]
+    fn test_gdrive_http_auth() {
+        let yaml = r#"
+mounts:
+  - path: /mnt/gdrive
+    connector:
+      type: gdrive
+      root_folder_id: "root"
+      auth:
+        type: http
+        endpoint: "https://api.example.com/token"
+        method: POST
+        headers:
+          Authorization: "Bearer my-token"
+          X-User-Id: "user-123"
+"#;
+
+        let config = Config::from_str(yaml).unwrap();
+        assert_eq!(config.mounts.len(), 1);
+
+        match &config.mounts[0].connector {
+            ConnectorConfig::GDrive(gdrive) => {
+                assert_eq!(gdrive.root_folder_id, "root");
+                match &gdrive.auth {
+                    GDriveAuthConfig::Http {
+                        endpoint,
+                        method,
+                        headers,
+                    } => {
+                        assert_eq!(endpoint, "https://api.example.com/token");
+                        assert_eq!(method, "POST");
+                        assert_eq!(headers.get("Authorization"), Some(&"Bearer my-token".to_string()));
+                        assert_eq!(headers.get("X-User-Id"), Some(&"user-123".to_string()));
+                    }
+                    _ => panic!("Expected Http auth"),
+                }
+            }
+            _ => panic!("Expected GDrive connector"),
+        }
+    }
+
+    #[test]
+    fn test_gdrive_http_auth_default_method() {
+        let yaml = r#"
+mounts:
+  - path: /mnt/gdrive
+    connector:
+      type: gdrive
+      root_folder_id: "root"
+      auth:
+        type: http
+        endpoint: "https://api.example.com/token"
+"#;
+
+        let config = Config::from_str(yaml).unwrap();
+
+        match &config.mounts[0].connector {
+            ConnectorConfig::GDrive(gdrive) => match &gdrive.auth {
+                GDriveAuthConfig::Http { method, headers, .. } => {
+                    assert_eq!(method, "GET");
+                    assert!(headers.is_empty());
+                }
+                _ => panic!("Expected Http auth"),
+            },
+            _ => panic!("Expected GDrive connector"),
+        }
+    }
+
+    #[test]
+    fn test_gdrive_static_token_auth() {
+        let yaml = r#"
+mounts:
+  - path: /mnt/gdrive
+    connector:
+      type: gdrive
+      root_folder_id: "root"
+      auth:
+        type: token
+        access_token: "ya29.test_token"
+"#;
+
+        let config = Config::from_str(yaml).unwrap();
+        assert_eq!(config.mounts.len(), 1);
+
+        match &config.mounts[0].connector {
+            ConnectorConfig::GDrive(gdrive) => match &gdrive.auth {
+                GDriveAuthConfig::Token { access_token } => {
+                    assert_eq!(access_token, "ya29.test_token");
+                }
+                _ => panic!("Expected Token auth"),
+            },
+            _ => panic!("Expected GDrive connector"),
+        }
+    }
+
+    #[test]
+    fn test_gdrive_auth_env_var_substitution() {
+        use std::env;
+        env::set_var("TEST_GDRIVE_SECRET", "secret_from_env");
+
+        let yaml = r#"
+mounts:
+  - path: /mnt/gdrive
+    connector:
+      type: gdrive
+      root_folder_id: "root"
+      auth:
+        type: http
+        endpoint: "https://api.example.com/token"
+        headers:
+          Authorization: "Bearer ${TEST_GDRIVE_SECRET}"
+"#;
+
+        let config = Config::from_str(yaml).unwrap();
+
+        match &config.mounts[0].connector {
+            ConnectorConfig::GDrive(gdrive) => match &gdrive.auth {
+                GDriveAuthConfig::Http { headers, .. } => {
+                    assert_eq!(headers.get("Authorization"), Some(&"Bearer secret_from_env".to_string()));
+                }
+                _ => panic!("Expected Http auth"),
+            },
+            _ => panic!("Expected GDrive connector"),
+        }
+
+        env::remove_var("TEST_GDRIVE_SECRET");
+    }
+
+    #[test]
+    fn test_gdrive_auth_inheritance_from_defaults() {
+        let yaml = r#"
+connectors:
+  gdrive:
+    root_folder_id: "default-folder"
+    auth:
+      type: service_account
+      credentials_path: "/default/creds.json"
+
+mounts:
+  - path: /mnt/gdrive1
+    connector:
+      type: gdrive
+  - path: /mnt/gdrive2
+    connector:
+      type: gdrive
+      root_folder_id: "custom-folder"
+      auth:
+        type: token
+        access_token: "custom-token"
+"#;
+
+        let config = Config::from_str(yaml).unwrap();
+        assert_eq!(config.mounts.len(), 2);
+
+        // First mount inherits everything from defaults
+        match &config.mounts[0].connector {
+            ConnectorConfig::GDrive(gdrive) => {
+                assert_eq!(gdrive.root_folder_id, "default-folder");
+                match &gdrive.auth {
+                    GDriveAuthConfig::ServiceAccount { credentials_path } => {
+                        assert_eq!(credentials_path, &PathBuf::from("/default/creds.json"));
+                    }
+                    _ => panic!("Expected ServiceAccount auth"),
+                }
+            }
+            _ => panic!("Expected GDrive connector"),
+        }
+
+        // Second mount overrides both root_folder_id and auth
+        match &config.mounts[1].connector {
+            ConnectorConfig::GDrive(gdrive) => {
+                assert_eq!(gdrive.root_folder_id, "custom-folder");
+                match &gdrive.auth {
+                    GDriveAuthConfig::Token { access_token } => {
+                        assert_eq!(access_token, "custom-token");
+                    }
+                    _ => panic!("Expected Token auth"),
+                }
+            }
+            _ => panic!("Expected GDrive connector"),
+        }
+    }
+
+    #[test]
+    fn test_gdrive_missing_auth_error() {
+        let yaml = r#"
+mounts:
+  - path: /mnt/gdrive
+    connector:
+      type: gdrive
+      root_folder_id: "root"
+"#;
+
+        let result = Config::from_str(yaml);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("no auth specified"),
+            "Error should mention missing auth: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_error_mode_default() {
+        let yaml = r#"
+mounts:
+  - path: /mnt/data
+    connector:
+      type: s3
+      bucket: my-bucket
+"#;
+
+        let config = Config::from_str(yaml).unwrap();
+        assert_eq!(config.error_mode, ErrorMode::Continue);
+    }
+
+    #[test]
+    fn test_error_mode_continue() {
+        let yaml = r#"
+error_mode: continue
+
+mounts:
+  - path: /mnt/data
+    connector:
+      type: s3
+      bucket: my-bucket
+"#;
+
+        let config = Config::from_str(yaml).unwrap();
+        assert_eq!(config.error_mode, ErrorMode::Continue);
+    }
+
+    #[test]
+    fn test_error_mode_exit() {
+        let yaml = r#"
+error_mode: exit
+
+mounts:
+  - path: /mnt/data
+    connector:
+      type: s3
+      bucket: my-bucket
+"#;
+
+        let config = Config::from_str(yaml).unwrap();
+        assert_eq!(config.error_mode, ErrorMode::Exit);
     }
 }

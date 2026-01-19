@@ -1,6 +1,7 @@
 //! Google Drive connector implementation
 //!
-//! This connector provides access to Google Drive using a service account.
+//! This connector provides access to Google Drive using flexible authentication.
+//! Supports service accounts, HTTP-based token providers, and static tokens.
 //! Files and folders are accessed via path resolution that maps paths to
 //! Google Drive file IDs.
 
@@ -13,14 +14,15 @@ use async_stream::try_stream;
 use async_trait::async_trait;
 use bytes::Bytes;
 use google_drive3::api::{File, Scope};
-use google_drive3::yup_oauth2::{read_service_account_key, ServiceAccountAuthenticator};
 use google_drive3::DriveHub;
 use http_body_util::BodyExt;
 use hyper_util::client::legacy::connect::HttpConnector;
 use parking_lot::RwLock;
 use tracing::{debug, trace};
 
-use crate::config::GDriveConnectorConfig;
+use crate::auth::http::{HttpTokenProvider, HttpTokenProviderConfig};
+use crate::auth::{ServiceAccountProvider, StaticTokenProvider, TokenProviderWrapper};
+use crate::config::{GDriveAuthConfig, GDriveConnectorConfig};
 use crate::connector::{
     CacheRequirement, CacheRequirements, Capabilities, Connector, DirEntry, DirEntryStream,
     Metadata,
@@ -49,20 +51,8 @@ pub struct GDriveConnector {
 impl GDriveConnector {
     /// Create a new Google Drive connector from configuration
     pub async fn new(config: GDriveConnectorConfig) -> Result<Self> {
-        // Load service account credentials
-        let creds = read_service_account_key(&config.credentials_path)
-            .await
-            .map_err(|e| {
-                FuseAdapterError::Backend(format!("Failed to read credentials: {}", e))
-            })?;
-
-        // Create authenticator
-        let auth = ServiceAccountAuthenticator::builder(creds)
-            .build()
-            .await
-            .map_err(|e| {
-                FuseAdapterError::Backend(format!("Failed to create authenticator: {}", e))
-            })?;
+        // Create token provider based on auth config
+        let token_provider = Self::create_token_provider(&config.auth).await?;
 
         // Create HTTPS connector
         let https = hyper_rustls::HttpsConnectorBuilder::new()
@@ -77,8 +67,8 @@ impl GDriveConnector {
         let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
             .build(https);
 
-        // Create Drive hub
-        let hub = DriveHub::new(client, auth);
+        // Create Drive hub with token provider
+        let hub = DriveHub::new(client, token_provider);
 
         // Initialize path cache with root
         let mut path_cache = HashMap::new();
@@ -90,6 +80,40 @@ impl GDriveConnector {
             root_folder_id: config.root_folder_id,
             path_cache: RwLock::new(path_cache),
         })
+    }
+
+    /// Create a token provider based on the auth configuration.
+    async fn create_token_provider(auth: &GDriveAuthConfig) -> Result<TokenProviderWrapper> {
+        match auth {
+            GDriveAuthConfig::ServiceAccount { credentials_path } => {
+                let provider = ServiceAccountProvider::from_file(credentials_path)
+                    .await
+                    .map_err(|e| {
+                        FuseAdapterError::Backend(format!(
+                            "Failed to create service account provider: {}",
+                            e
+                        ))
+                    })?;
+                Ok(TokenProviderWrapper::new(provider))
+            }
+            GDriveAuthConfig::Http {
+                endpoint,
+                method,
+                headers,
+            } => {
+                let config = HttpTokenProviderConfig {
+                    endpoint: endpoint.clone(),
+                    method: method.clone(),
+                    headers: headers.clone(),
+                };
+                let provider = HttpTokenProvider::new(config);
+                Ok(TokenProviderWrapper::new(provider))
+            }
+            GDriveAuthConfig::Token { access_token } => {
+                let provider = StaticTokenProvider::new(access_token.clone());
+                Ok(TokenProviderWrapper::new(provider))
+            }
+        }
     }
 
     /// Normalize a path to a consistent format

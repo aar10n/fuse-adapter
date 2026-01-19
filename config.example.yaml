@@ -8,6 +8,11 @@ logging:
   # Log level: trace, debug, info, warn, error
   level: info
 
+# Error handling mode for connector failures during startup
+# - continue: Log errors but continue with remaining successful mounts (default)
+# - exit: Exit with error code on first connector failure
+error_mode: continue
+
 # =============================================================================
 # Connector Defaults (Optional)
 # =============================================================================
@@ -79,14 +84,48 @@ mounts:
       type: none
 
   # --- Google Drive connector ---
-  # Uses OAuth2 service account credentials from a JSON file.
-  # To set up: Create a service account in Google Cloud Console, enable Drive API,
-  # and download the credentials JSON. Share the target folder with the service account email.
+  # Mounts a Google Drive folder as a local filesystem.
+  # Supports three authentication methods: service_account, http, and token.
+  # root_folder_id is optional and defaults to "root" (My Drive).
+  #
+  # Service Account Auth:
+  # Create a service account in Google Cloud Console, enable Drive API,
+  # download the credentials JSON, and share the target folder with the
+  # service account email.
+  #
   # - path: /mnt/gdrive
   #   connector:
   #     type: gdrive
-  #     credentials_path: /etc/fuse-adapter/gdrive-service-account.json
-  #     root_folder_id: "1ABC123DEF456_folder_id_from_drive_url"
+  #     # root_folder_id: "1ABC123..."  # optional, defaults to "root"
+  #     auth:
+  #       type: service_account
+  #       credentials_path: /etc/fuse-adapter/gdrive-service-account.json
   #   cache:
   #     type: filesystem
   #     path: /var/cache/fuse-adapter/gdrive
+  #
+  # HTTP Token Provider Auth:
+  # Fetches OAuth tokens from an external endpoint. Supports environment
+  # variable substitution with ${VAR_NAME} syntax in header values.
+  # Endpoint should return JSON: { "access_token": "...", "expires_in": 3600 }
+  #
+  # - path: /mnt/gdrive
+  #   connector:
+  #     type: gdrive
+  #     auth:
+  #       type: http
+  #       endpoint: "https://auth.example.com/oauth/token"
+  #       method: GET                        # optional, defaults to GET
+  #       headers:
+  #         Authorization: "Bearer ${AUTH_TOKEN}"
+  #         X-User-Id: "user@example.com"
+  #
+  # Static Token Auth (for testing):
+  # Uses a pre-obtained OAuth access token directly.
+  #
+  # - path: /mnt/gdrive
+  #   connector:
+  #     type: gdrive
+  #     auth:
+  #       type: token
+  #       access_token: "ya29.your_access_token_here"

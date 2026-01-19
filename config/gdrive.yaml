@@ -1,0 +1,30 @@
+# Google Drive connector configuration (static token auth)
+#
+# Static token auth is useful for testing. Get a token from:
+# https://developers.google.com/oauthplayground/
+#
+# Usage:
+#   cargo run -- config/gdrive.yaml
+
+logging:
+  level: debug
+
+error_mode: exit
+
+connectors:
+  gdrive:
+    # root_folder_id is optional, defaults to "root" (My Drive)
+    # root_folder_id: "1ABC123DEF456"
+    auth:
+      type: token
+      access_token: "ya29.a0AfH6SMBx..."
+    cache:
+      type: filesystem
+      path: /tmp/fuse-adapter/cache/gdrive
+      max_size: "512MB"
+      flush_interval: 30s
+
+mounts:
+  - path: /tmp/fuse-adapter/gdrive
+    connector:
+      type: gdrive

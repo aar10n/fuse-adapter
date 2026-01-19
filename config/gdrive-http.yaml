@@ -1,0 +1,34 @@
+# Google Drive connector with HTTP token provider authentication
+#
+# Fetches OAuth tokens from an external endpoint. Useful when
+# integrating with custom auth services or token brokers.
+#
+# The endpoint should return JSON: { "access_token": "...", "expires_in": 3600 }
+
+logging:
+  level: debug
+
+error_mode: exit
+
+connectors:
+  gdrive:
+    # root_folder_id is optional, defaults to "root" (My Drive)
+    # root_folder_id: "1ABC123DEF456"
+    auth:
+      type: http
+      endpoint: "https://auth.example.com/oauth/token"
+      method: GET    # optional, defaults to GET
+      headers:
+        Authorization: "Bearer ${AUTH_TOKEN}"
+        X-User-Id: "user@example.com"
+        X-Custom-Header: "custom-value"
+    cache:
+      type: filesystem
+      path: /tmp/fuse-adapter/cache/gdrive
+      max_size: "512MB"
+      flush_interval: 30s
+
+mounts:
+  - path: /tmp/fuse-adapter/gdrive
+    connector:
+      type: gdrive

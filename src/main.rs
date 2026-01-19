@@ -11,7 +11,7 @@ use fuse_adapter::cache::filesystem::{FilesystemCache, FilesystemCacheConfig};
 use fuse_adapter::cache::memory::{MemoryCache, MemoryCacheConfig};
 use fuse_adapter::cache::none::NoCache;
 use fuse_adapter::cache::CacheConfig;
-use fuse_adapter::config::{Config, ConnectorConfig};
+use fuse_adapter::config::{Config, ConnectorConfig, ErrorMode};
 use fuse_adapter::connector::gdrive::GDriveConnector;
 use fuse_adapter::connector::s3::S3Connector;
 use fuse_adapter::connector::Connector;
@@ -89,12 +89,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Create the connector based on type
         let connector: Arc<dyn Connector> = match &mount_config.connector {
             ConnectorConfig::S3(s3_config) => {
-                let s3 = S3Connector::new(s3_config.clone()).await?;
-                wrap_with_cache(s3, &mount_config.cache)?
+                match S3Connector::new(s3_config.clone()).await {
+                    Ok(s3) => match wrap_with_cache(s3, &mount_config.cache) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            error!("Failed to create cache for {:?}: {}", mount_config.path, e);
+                            if config.error_mode == ErrorMode::Exit {
+                                std::process::exit(1);
+                            }
+                            continue;
+                        }
+                    },
+                    Err(e) => {
+                        error!("Failed to create S3 connector for {:?}: {}", mount_config.path, e);
+                        if config.error_mode == ErrorMode::Exit {
+                            std::process::exit(1);
+                        }
+                        continue;
+                    }
+                }
             }
             ConnectorConfig::GDrive(gdrive_config) => {
-                let gdrive = GDriveConnector::new(gdrive_config.clone()).await?;
-                wrap_with_cache(gdrive, &mount_config.cache)?
+                match GDriveConnector::new(gdrive_config.clone()).await {
+                    Ok(gdrive) => match wrap_with_cache(gdrive, &mount_config.cache) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            error!("Failed to create cache for {:?}: {}", mount_config.path, e);
+                            if config.error_mode == ErrorMode::Exit {
+                                std::process::exit(1);
+                            }
+                            continue;
+                        }
+                    },
+                    Err(e) => {
+                        error!("Failed to create GDrive connector for {:?}: {}", mount_config.path, e);
+                        if config.error_mode == ErrorMode::Exit {
+                            std::process::exit(1);
+                        }
+                        continue;
+                    }
+                }
             }
         };
 
@@ -106,6 +140,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "Failed to create mount point {:?}: {}",
                     mount_config.path, e
                 );
+                if config.error_mode == ErrorMode::Exit {
+                    std::process::exit(1);
+                }
                 continue;
             }
         }
@@ -113,6 +150,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Mount the filesystem
         if let Err(e) = manager.mount(mount_config.path.clone(), connector) {
             error!("Failed to mount {:?}: {}", mount_config.path, e);
+            if config.error_mode == ErrorMode::Exit {
+                std::process::exit(1);
+            }
             continue;
         }
     }

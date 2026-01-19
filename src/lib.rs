@@ -33,9 +33,11 @@
 //! # }
 //! ```
 
+pub mod auth;
 pub mod cache;
 pub mod config;
 pub mod connector;
+pub mod env;
 pub mod error;
 pub mod fuse;
 pub mod mount;
