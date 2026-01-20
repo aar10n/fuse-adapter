@@ -565,11 +565,11 @@ impl Config {
         let content = std::fs::read_to_string(path)
             .map_err(|e| ConfigError::ReadError(path.clone(), e.to_string()))?;
 
-        Self::from_str(&content)
+        Self::parse(&content)
     }
 
     /// Parse configuration from a YAML string
-    pub fn from_str(content: &str) -> Result<Self, ConfigError> {
+    pub fn parse(content: &str) -> Result<Self, ConfigError> {
         let raw: RawConfig =
             serde_yaml::from_str(content).map_err(|e| ConfigError::ParseError(e.to_string()))?;
         raw.resolve()
@@ -650,7 +650,7 @@ mounts:
       type: none
 "#;
 
-        let config = Config::from_str(yaml).unwrap();
+        let config = Config::parse(yaml).unwrap();
         assert_eq!(config.logging.level, "debug");
         assert_eq!(config.mounts.len(), 1);
 
@@ -691,7 +691,7 @@ mounts:
       type: memory
 "#;
 
-        let config = Config::from_str(yaml).unwrap();
+        let config = Config::parse(yaml).unwrap();
         assert_eq!(config.mounts.len(), 2);
 
         // First mount inherits everything from defaults
@@ -741,7 +741,7 @@ mounts:
       prefix: "data/"
 "#;
 
-        let result = Config::from_str(yaml);
+        let result = Config::parse(yaml);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
@@ -783,7 +783,7 @@ mounts:
       region: eu-west-1
 "#;
 
-        let config = Config::from_str(yaml).unwrap();
+        let config = Config::parse(yaml).unwrap();
         assert_eq!(config.mounts.len(), 2);
 
         // First uses defaults
@@ -823,7 +823,7 @@ mounts:
       bucket: other-bucket
 "#;
 
-        let config = Config::from_str(yaml).unwrap();
+        let config = Config::parse(yaml).unwrap();
         assert_eq!(config.mounts.len(), 1);
 
         match &config.mounts[0].connector {
@@ -858,7 +858,7 @@ mounts:
       read_only: false
 "#;
 
-        let config = Config::from_str(yaml).unwrap();
+        let config = Config::parse(yaml).unwrap();
         assert_eq!(config.mounts.len(), 2);
 
         // First mount inherits read_only from defaults
@@ -891,7 +891,7 @@ mounts:
         credentials_path: "/path/to/creds.json"
 "#;
 
-        let config = Config::from_str(yaml).unwrap();
+        let config = Config::parse(yaml).unwrap();
         assert_eq!(config.mounts.len(), 1);
 
         match &config.mounts[0].connector {
@@ -925,7 +925,7 @@ mounts:
           X-User-Id: "user-123"
 "#;
 
-        let config = Config::from_str(yaml).unwrap();
+        let config = Config::parse(yaml).unwrap();
         assert_eq!(config.mounts.len(), 1);
 
         match &config.mounts[0].connector {
@@ -965,7 +965,7 @@ mounts:
         endpoint: "https://api.example.com/token"
 "#;
 
-        let config = Config::from_str(yaml).unwrap();
+        let config = Config::parse(yaml).unwrap();
 
         match &config.mounts[0].connector {
             ConnectorConfig::GDrive(gdrive) => match &gdrive.auth {
@@ -994,7 +994,7 @@ mounts:
         access_token: "ya29.test_token"
 "#;
 
-        let config = Config::from_str(yaml).unwrap();
+        let config = Config::parse(yaml).unwrap();
         assert_eq!(config.mounts.len(), 1);
 
         match &config.mounts[0].connector {
@@ -1026,7 +1026,7 @@ mounts:
           Authorization: "Bearer ${TEST_GDRIVE_SECRET}"
 "#;
 
-        let config = Config::from_str(yaml).unwrap();
+        let config = Config::parse(yaml).unwrap();
 
         match &config.mounts[0].connector {
             ConnectorConfig::GDrive(gdrive) => match &gdrive.auth {
@@ -1067,7 +1067,7 @@ mounts:
         access_token: "custom-token"
 "#;
 
-        let config = Config::from_str(yaml).unwrap();
+        let config = Config::parse(yaml).unwrap();
         assert_eq!(config.mounts.len(), 2);
 
         // First mount inherits everything from defaults
@@ -1109,7 +1109,7 @@ mounts:
       root_folder_id: "root"
 "#;
 
-        let result = Config::from_str(yaml);
+        let result = Config::parse(yaml);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
@@ -1129,7 +1129,7 @@ mounts:
       bucket: my-bucket
 "#;
 
-        let config = Config::from_str(yaml).unwrap();
+        let config = Config::parse(yaml).unwrap();
         assert_eq!(config.error_mode, ErrorMode::Continue);
     }
 
@@ -1145,7 +1145,7 @@ mounts:
       bucket: my-bucket
 "#;
 
-        let config = Config::from_str(yaml).unwrap();
+        let config = Config::parse(yaml).unwrap();
         assert_eq!(config.error_mode, ErrorMode::Continue);
     }
 
@@ -1161,7 +1161,7 @@ mounts:
       bucket: my-bucket
 "#;
 
-        let config = Config::from_str(yaml).unwrap();
+        let config = Config::parse(yaml).unwrap();
         assert_eq!(config.error_mode, ErrorMode::Exit);
     }
 
@@ -1182,7 +1182,7 @@ mounts:
       bucket: cache
 "#;
 
-        let config = Config::from_str(yaml).unwrap();
+        let config = Config::parse(yaml).unwrap();
         assert_eq!(config.error_mode, ErrorMode::Continue); // Global default
 
         // First mount overrides to exit
@@ -1202,7 +1202,7 @@ mounts:
       bucket: my-bucket
 "#;
 
-        let config = Config::from_str(yaml).unwrap();
+        let config = Config::parse(yaml).unwrap();
         let overlay = config.mounts[0].status_overlay.as_ref().unwrap();
         assert_eq!(overlay.prefix, ".fuse-adapter");
         assert_eq!(overlay.max_log_entries, 1000);
@@ -1221,7 +1221,7 @@ mounts:
       bucket: my-bucket
 "#;
 
-        let config = Config::from_str(yaml).unwrap();
+        let config = Config::parse(yaml).unwrap();
         let overlay = config.mounts[0].status_overlay.as_ref().unwrap();
         assert_eq!(overlay.prefix, ".status");
         assert_eq!(overlay.max_log_entries, 500);
@@ -1237,7 +1237,7 @@ mounts:
       bucket: my-bucket
 "#;
 
-        let config = Config::from_str(yaml).unwrap();
+        let config = Config::parse(yaml).unwrap();
         assert!(config.mounts[0].status_overlay.is_none());
     }
 
@@ -1260,7 +1260,7 @@ mounts:
       bucket: cache
 "#;
 
-        let config = Config::from_str(yaml).unwrap();
+        let config = Config::parse(yaml).unwrap();
 
         // First mount inherits global exit mode, no overlay
         assert_eq!(config.mounts[0].error_mode, ErrorMode::Exit);

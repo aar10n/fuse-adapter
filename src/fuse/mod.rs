@@ -39,7 +39,7 @@ fn metadata_to_attr(ino: u64, meta: &Metadata) -> FileAttr {
     let kind = to_fuse_file_type(meta.file_type);
     let perm = meta.mode_or_default() as u16;
     let nlink = if meta.is_dir() { 2 } else { 1 };
-    let blocks = (meta.size + BLOCK_SIZE as u64 - 1) / BLOCK_SIZE as u64;
+    let blocks = meta.size.div_ceil(BLOCK_SIZE as u64);
 
     FileAttr {
         ino,
@@ -628,12 +628,11 @@ impl Filesystem for FuseAdapter {
         // Add . and ..
         let mut idx = 0i64;
 
-        if offset <= idx {
-            if reply.add(ino, idx + 1, FuseFileType::Directory, ".") {
+        if offset <= idx
+            && reply.add(ino, idx + 1, FuseFileType::Directory, ".") {
                 reply.ok();
                 return;
             }
-        }
         idx += 1;
 
         if offset <= idx {

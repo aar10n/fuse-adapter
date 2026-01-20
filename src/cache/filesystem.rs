@@ -507,7 +507,7 @@ impl<C: Connector + 'static> Connector for FilesystemCache<C> {
         // If file doesn't exist in cache, fetch it first (unless it's a new file)
         if !self.is_cached(path) && offset > 0 {
             // Need existing content for non-zero offset writes
-            if let Ok(_) = self.inner.stat(path).await {
+            if self.inner.stat(path).await.is_ok() {
                 self.fetch_to_cache(path).await?;
             }
         }

@@ -110,10 +110,8 @@ impl StatusOverlay {
     /// Check if a path is within the virtual status directory
     fn is_virtual_path(&self, path: &Path) -> bool {
         let prefix = &self.config.prefix;
-        if let Some(first_component) = path.components().next() {
-            if let std::path::Component::Normal(name) = first_component {
-                return name.to_string_lossy() == *prefix;
-            }
+        if let Some(std::path::Component::Normal(name)) = path.components().next() {
+            return name.to_string_lossy() == *prefix;
         }
         false
     }

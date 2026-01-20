@@ -234,7 +234,7 @@ impl Connector for S3Connector {
         }
 
         // Also check for common prefixes
-        if list_result.common_prefixes().len() > 0 {
+        if !list_result.common_prefixes().is_empty() {
             return Ok(Metadata::directory(SystemTime::now()));
         }
 
@@ -403,7 +403,7 @@ impl Connector for S3Connector {
             let contents = list_result.contents();
             let non_dir_objects: Vec<_> = contents
                 .iter()
-                .filter(|obj| obj.key().map(|k| k != &key).unwrap_or(true))
+                .filter(|obj| obj.key().map(|k| k != key).unwrap_or(true))
                 .collect();
 
             if !non_dir_objects.is_empty() {

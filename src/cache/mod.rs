@@ -9,8 +9,10 @@ use serde::Deserialize;
 /// Cache configuration
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
+#[derive(Default)]
 pub enum CacheConfig {
     /// No caching
+    #[default]
     None,
     /// In-memory cache
     Memory { max_entries: Option<usize> },
@@ -26,11 +28,6 @@ pub enum CacheConfig {
     },
 }
 
-impl Default for CacheConfig {
-    fn default() -> Self {
-        CacheConfig::None
-    }
-}
 
 /// Parse size string like "1GB" to bytes
 pub fn parse_size(s: &str) -> Option<u64> {

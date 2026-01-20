@@ -102,7 +102,7 @@ impl MountManager {
 
         // Mount in background
         let session =
-            fuser::spawn_mount2(adapter, &path, &options).map_err(|e| FuseAdapterError::Io(e))?;
+            fuser::spawn_mount2(adapter, &path, &options).map_err(FuseAdapterError::Io)?;
 
         // Track the mount
         let active = ActiveMount::new(path.clone(), session);
