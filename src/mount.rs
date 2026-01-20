@@ -84,16 +84,25 @@ impl MountManager {
             )));
         }
 
+        // Check if connector is read-only
+        let is_read_only = !connector.capabilities().write;
+
         // Create the FUSE adapter
         let adapter = FuseAdapter::new(connector, self.handle.clone());
 
         // Configure mount options
-        let options = vec![
+        let mut options = vec![
             MountOption::FSName("fuse-adapter".to_string()),
             MountOption::AutoUnmount,
             MountOption::AllowOther,
             MountOption::DefaultPermissions,
         ];
+
+        // Add read-only mount option if connector doesn't support writes
+        if is_read_only {
+            info!("Mounting {:?} as read-only", path);
+            options.push(MountOption::RO);
+        }
 
         // Mount in background
         let session = fuser::spawn_mount2(adapter, &path, &options)

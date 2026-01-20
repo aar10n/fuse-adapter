@@ -17,7 +17,9 @@ TESTS_DIR="${SCRIPT_DIR}/tests"
 # Configuration
 MOUNT_BASE="${TEST_MOUNT_BASE:-/tmp/fuse-adapter-test}"
 MOUNT_PATH="${MOUNT_BASE}/mnt"
+MOUNT_PATH_RO="${MOUNT_BASE}/mnt-ro"
 CACHE_PATH="${MOUNT_BASE}/cache"
+CACHE_PATH_RO="${MOUNT_BASE}/cache-ro"
 CONFIG_PATH="${MOUNT_BASE}/config.yaml"
 PID_FILE="${MOUNT_BASE}/adapter.pid"
 LOG_FILE="${MOUNT_BASE}/adapter.log"
@@ -96,13 +98,15 @@ cleanup() {
         rm -f "${PID_FILE}"
     fi
 
-    # Force unmount
-    if mountpoint -q "${MOUNT_PATH}" 2>/dev/null; then
-        log_debug "Unmounting ${MOUNT_PATH}..."
-        umount "${MOUNT_PATH}" 2>/dev/null || \
-        fusermount -u "${MOUNT_PATH}" 2>/dev/null || \
-        diskutil unmount "${MOUNT_PATH}" 2>/dev/null || true
-    fi
+    # Force unmount both mounts
+    for mp in "${MOUNT_PATH}" "${MOUNT_PATH_RO}"; do
+        if mountpoint -q "${mp}" 2>/dev/null; then
+            log_debug "Unmounting ${mp}..."
+            umount "${mp}" 2>/dev/null || \
+            fusermount -u "${mp}" 2>/dev/null || \
+            diskutil unmount "${mp}" 2>/dev/null || true
+        fi
+    done
 
     # Clean bucket (only if we created it)
     if ! $CI_MODE; then
@@ -149,7 +153,7 @@ setup_minio() {
 generate_config() {
     log_info "Generating test configuration..."
 
-    mkdir -p "${MOUNT_PATH}" "${CACHE_PATH}"
+    mkdir -p "${MOUNT_PATH}" "${MOUNT_PATH_RO}" "${CACHE_PATH}" "${CACHE_PATH_RO}"
 
     cat > "${CONFIG_PATH}" <<EOF
 logging:
@@ -161,16 +165,27 @@ connectors:
     region: us-east-1
     endpoint: "${MINIO_ENDPOINT}"
     force_path_style: true
-    cache:
-      type: filesystem
-      path: ${CACHE_PATH}
-      max_size: "256MB"
-      flush_interval: 5s
 
 mounts:
   - path: ${MOUNT_PATH}
     connector:
       type: s3
+      prefix: "rw/"
+    cache:
+      type: filesystem
+      path: ${CACHE_PATH}
+      max_size: "256MB"
+      flush_interval: 5s
+  - path: ${MOUNT_PATH_RO}
+    connector:
+      type: s3
+      prefix: "ro/"
+      read_only: true
+    cache:
+      type: filesystem
+      path: ${CACHE_PATH_RO}
+      max_size: "256MB"
+      flush_interval: 5s
 EOF
 
     log_debug "Config written to ${CONFIG_PATH}"
@@ -204,12 +219,22 @@ start_adapter() {
 
 # Wait for mount to be ready
 wait_for_mount() {
-    log_info "Waiting for mount..."
+    log_info "Waiting for mounts..."
 
+    local mounts_ready=0
     for i in {1..30}; do
-        # Check if mount point is accessible
+        mounts_ready=0
+
+        # Check if both mount points are accessible
         if ls "${MOUNT_PATH}" >/dev/null 2>&1; then
-            log_info "Mount ready at ${MOUNT_PATH}"
+            ((mounts_ready++)) || true
+        fi
+        if ls "${MOUNT_PATH_RO}" >/dev/null 2>&1; then
+            ((mounts_ready++)) || true
+        fi
+
+        if [[ ${mounts_ready} -ge 2 ]]; then
+            log_info "Mounts ready at ${MOUNT_PATH} and ${MOUNT_PATH_RO}"
             return 0
         fi
 
@@ -226,7 +251,7 @@ wait_for_mount() {
         sleep 1
     done
 
-    log_error "Mount did not become ready within 30 seconds"
+    log_error "Mounts did not become ready within 30 seconds"
     cat "${LOG_FILE}"
     exit 1
 }
@@ -236,8 +261,9 @@ run_tests() {
     log_info "Running tests..."
     echo ""
 
-    # Export mount path for test scripts
+    # Export mount paths for test scripts
     export MOUNT_PATH
+    export MOUNT_PATH_RO
     export TEST_PASSED
     export TEST_FAILED
 

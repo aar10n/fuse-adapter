@@ -13,8 +13,9 @@ NC='\033[0m'
 : "${TEST_PASSED:=0}"
 : "${TEST_FAILED:=0}"
 
-# Mount point (set by harness)
+# Mount points (set by harness)
 : "${MOUNT_PATH:=/tmp/fuse-adapter-test/mnt}"
+: "${MOUNT_PATH_RO:=/tmp/fuse-adapter-test/mnt-ro}"
 
 # Detect OS for stat command differences
 if [[ "$(uname)" == "Darwin" ]]; then
