@@ -1,0 +1,24 @@
+logging:
+  level: debug
+
+error_mode: exit
+
+connectors:
+  gdrive:
+    #root_folder_id: ""
+    auth:
+      type: http
+      endpoint: "http://localhost:8000/internal/v1/service/tool-auth/google_drive/token?user_id=f72b100a-1eb9-436b-b285-d46b329736df"
+      method: GET
+      headers:
+        X-Service-Auth: sandbox-helper:sandbox-helper-secret
+    cache:
+      type: filesystem
+      path: /tmp/fuse-adapter/cache/gdrive
+      max_size: "512MB"
+      flush_interval: 30s
+
+mounts:
+  - path: /tmp/fuse-adapter/gdrive
+    connector:
+      type: gdrive

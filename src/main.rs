@@ -16,6 +16,7 @@ use fuse_adapter::connector::gdrive::GDriveConnector;
 use fuse_adapter::connector::s3::S3Connector;
 use fuse_adapter::connector::Connector;
 use fuse_adapter::mount::MountManager;
+use fuse_adapter::overlay::StatusOverlay;
 
 /// Print usage information
 fn print_usage() {
@@ -62,12 +63,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Initialize logging
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(&config.logging.level));
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.logging.level));
 
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .init();
+    tracing_subscriber::fmt().with_env_filter(filter).init();
 
     info!("fuse-adapter starting");
     info!("Loaded configuration from {:?}", config_path);
@@ -91,48 +90,58 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for mount_config in &config.mounts {
         info!("Setting up mount at {:?}", mount_config.path);
 
-        // Create the connector based on type
-        let connector: Arc<dyn Connector> = match &mount_config.connector {
-            ConnectorConfig::S3(s3_config) => {
-                match S3Connector::new(s3_config.clone()).await {
-                    Ok(s3) => match wrap_with_cache(s3, &mount_config.cache) {
-                        Ok(c) => c,
-                        Err(e) => {
-                            error!("Failed to create cache for {:?}: {}", mount_config.path, e);
-                            if config.error_mode == ErrorMode::Exit {
-                                std::process::exit(1);
-                            }
-                            continue;
-                        }
-                    },
-                    Err(e) => {
-                        error!("Failed to create S3 connector for {:?}: {}", mount_config.path, e);
-                        if config.error_mode == ErrorMode::Exit {
-                            std::process::exit(1);
-                        }
-                        continue;
-                    }
-                }
-            }
+        // Use per-mount error_mode (already resolved from global default)
+        let error_mode = mount_config.error_mode;
+        let has_status_overlay = mount_config.status_overlay.is_some();
+
+        // Try to create connector + cache
+        let connector_result: Result<Arc<dyn Connector>, String> = match &mount_config.connector {
+            ConnectorConfig::S3(s3_config) => match S3Connector::new(s3_config.clone()).await {
+                Ok(s3) => match wrap_with_cache(s3, &mount_config.cache) {
+                    Ok(c) => Ok(c),
+                    Err(e) => Err(format!("Failed to create cache: {}", e)),
+                },
+                Err(e) => Err(format!("Failed to create S3 connector: {}", e)),
+            },
             ConnectorConfig::GDrive(gdrive_config) => {
                 match GDriveConnector::new(gdrive_config.clone()).await {
                     Ok(gdrive) => match wrap_with_cache(gdrive, &mount_config.cache) {
-                        Ok(c) => c,
-                        Err(e) => {
-                            error!("Failed to create cache for {:?}: {}", mount_config.path, e);
-                            if config.error_mode == ErrorMode::Exit {
-                                std::process::exit(1);
-                            }
-                            continue;
-                        }
+                        Ok(c) => Ok(c),
+                        Err(e) => Err(format!("Failed to create cache: {}", e)),
                     },
-                    Err(e) => {
-                        error!("Failed to create GDrive connector for {:?}: {}", mount_config.path, e);
-                        if config.error_mode == ErrorMode::Exit {
-                            std::process::exit(1);
-                        }
-                        continue;
+                    Err(e) => Err(format!("Failed to create GDrive connector: {}", e)),
+                }
+            }
+        };
+
+        // Handle connector creation result
+        let connector: Arc<dyn Connector> = match connector_result {
+            Ok(c) => {
+                // Wrap with status overlay if configured
+                if let Some(ref overlay_config) = mount_config.status_overlay {
+                    Arc::new(StatusOverlay::new(c, overlay_config.clone()))
+                } else {
+                    c
+                }
+            }
+            Err(init_error) => {
+                error!(
+                    "Connector failed for {:?}: {}",
+                    mount_config.path, init_error
+                );
+
+                // Can we mount with failed connector? Only if status_overlay is enabled and error_mode is Continue
+                if has_status_overlay && error_mode == ErrorMode::Continue {
+                    let overlay_config = mount_config.status_overlay.as_ref().unwrap();
+                    Arc::new(StatusOverlay::new_failed(
+                        init_error,
+                        overlay_config.clone(),
+                    ))
+                } else {
+                    if error_mode == ErrorMode::Exit {
+                        std::process::exit(1);
                     }
+                    continue; // Skip mount
                 }
             }
         };
@@ -145,7 +154,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "Failed to create mount point {:?}: {}",
                     mount_config.path, e
                 );
-                if config.error_mode == ErrorMode::Exit {
+                if error_mode == ErrorMode::Exit {
                     std::process::exit(1);
                 }
                 continue;
@@ -155,7 +164,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Mount the filesystem
         if let Err(e) = manager.mount(mount_config.path.clone(), connector) {
             error!("Failed to mount {:?}: {}", mount_config.path, e);
-            if config.error_mode == ErrorMode::Exit {
+            if error_mode == ErrorMode::Exit {
                 std::process::exit(1);
             }
             continue;
@@ -188,16 +197,18 @@ fn wrap_with_cache<C: Connector + 'static>(
     cache_config: &CacheConfig,
 ) -> Result<Arc<dyn Connector>, Box<dyn std::error::Error>> {
     match cache_config {
-        CacheConfig::None => {
-            Ok(Arc::new(NoCache::new(connector)))
-        }
+        CacheConfig::None => Ok(Arc::new(NoCache::new(connector))),
         CacheConfig::Memory { max_entries } => {
             let config = MemoryCacheConfig {
                 max_entries: max_entries.unwrap_or(1000),
             };
             Ok(Arc::new(MemoryCache::new(connector, config)))
         }
-        CacheConfig::Filesystem { path, max_size, flush_interval } => {
+        CacheConfig::Filesystem {
+            path,
+            max_size,
+            flush_interval,
+        } => {
             let config = FilesystemCacheConfig {
                 cache_dir: PathBuf::from(path),
                 max_size: max_size

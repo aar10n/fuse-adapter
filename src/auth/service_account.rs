@@ -28,12 +28,12 @@ impl ServiceAccountProvider {
     ///
     /// The credentials file should be a JSON file downloaded from the
     /// Google Cloud Console containing service account keys.
-    pub async fn from_file(credentials_path: &Path) -> Result<Self, Box<dyn StdError + Send + Sync>> {
+    pub async fn from_file(
+        credentials_path: &Path,
+    ) -> Result<Self, Box<dyn StdError + Send + Sync>> {
         let creds = read_service_account_key(credentials_path).await?;
 
-        let auth = ServiceAccountAuthenticator::builder(creds)
-            .build()
-            .await?;
+        let auth = ServiceAccountAuthenticator::builder(creds).build().await?;
 
         Ok(Self { auth })
     }
@@ -41,7 +41,10 @@ impl ServiceAccountProvider {
 
 #[async_trait]
 impl TokenProviderInner for ServiceAccountProvider {
-    async fn get_token(&self, scopes: &[&str]) -> Result<Option<String>, Box<dyn StdError + Send + Sync>> {
+    async fn get_token(
+        &self,
+        scopes: &[&str],
+    ) -> Result<Option<String>, Box<dyn StdError + Send + Sync>> {
         let token = self.auth.token(scopes).await?;
         Ok(token.token().map(|t| t.to_string()))
     }

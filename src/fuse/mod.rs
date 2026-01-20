@@ -294,9 +294,9 @@ impl Filesystem for FuseAdapter {
 
         let connector = self.connector.clone();
         let path_for_async = path.clone();
-        match self.run_async(async move {
-            connector.read(&path_for_async, offset as u64, size).await
-        }) {
+        match self
+            .run_async(async move { connector.read(&path_for_async, offset as u64, size).await })
+        {
             Ok(data) => {
                 reply.data(&data);
             }
@@ -337,9 +337,9 @@ impl Filesystem for FuseAdapter {
         let connector = self.connector.clone();
         let data = data.to_vec();
         let path_for_async = path.clone();
-        match self.run_async(async move {
-            connector.write(&path_for_async, offset as u64, &data).await
-        }) {
+        match self
+            .run_async(async move { connector.write(&path_for_async, offset as u64, &data).await })
+        {
             Ok(written) => {
                 reply.written(written as u32);
             }
@@ -381,7 +381,9 @@ impl Filesystem for FuseAdapter {
         let connector = self.connector.clone();
         let path_for_async = path.clone();
         match self.run_async(async move {
-            connector.create_file_with_mode(&path_for_async, effective_mode).await?;
+            connector
+                .create_file_with_mode(&path_for_async, effective_mode)
+                .await?;
             connector.stat(&path_for_async).await
         }) {
             Ok(meta) => {
@@ -426,7 +428,9 @@ impl Filesystem for FuseAdapter {
         let connector = self.connector.clone();
         let path_for_async = path.clone();
         match self.run_async(async move {
-            connector.create_dir_with_mode(&path_for_async, effective_mode).await?;
+            connector
+                .create_dir_with_mode(&path_for_async, effective_mode)
+                .await?;
             connector.stat(&path_for_async).await
         }) {
             Ok(meta) => {

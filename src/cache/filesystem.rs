@@ -15,9 +15,7 @@ use parking_lot::RwLock;
 use tokio::sync::Notify;
 use tracing::{debug, error, info, trace, warn};
 
-use crate::connector::{
-    CacheRequirements, Capabilities, Connector, DirEntryStream, Metadata,
-};
+use crate::connector::{CacheRequirements, Capabilities, Connector, DirEntryStream, Metadata};
 use crate::error::{FuseAdapterError, Result};
 
 /// Filesystem cache configuration
@@ -90,7 +88,10 @@ impl<C: Connector> FilesystemCache<C> {
     pub fn new(connector: C, config: FilesystemCacheConfig) -> Self {
         // Ensure cache directory exists
         if let Err(e) = std::fs::create_dir_all(&config.cache_dir) {
-            warn!("Failed to create cache directory {:?}: {}", config.cache_dir, e);
+            warn!(
+                "Failed to create cache directory {:?}: {}",
+                config.cache_dir, e
+            );
         }
 
         Self {
@@ -309,7 +310,9 @@ impl<C: Connector> FilesystemCache<C> {
             let file = std::fs::OpenOptions::new()
                 .write(true)
                 .open(&cache_path)
-                .map_err(|e| FuseAdapterError::Cache(format!("Failed to open cache file: {}", e)))?;
+                .map_err(|e| {
+                    FuseAdapterError::Cache(format!("Failed to open cache file: {}", e))
+                })?;
 
             file.set_len(size)
                 .map_err(|e| FuseAdapterError::Cache(format!("Failed to truncate: {}", e)))?;
@@ -480,7 +483,12 @@ impl<C: Connector + 'static> Connector for FilesystemCache<C> {
     async fn read(&self, path: &Path, offset: u64, size: u32) -> Result<Bytes> {
         // Try reading from cache first
         if let Some(data) = self.read_from_cache(path, offset, size)? {
-            trace!("read cache hit for {:?} offset={} size={}", path, offset, size);
+            trace!(
+                "read cache hit for {:?} offset={} size={}",
+                path,
+                offset,
+                size
+            );
             return Ok(data);
         }
 

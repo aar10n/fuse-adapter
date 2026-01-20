@@ -62,11 +62,7 @@ impl MountManager {
     }
 
     /// Mount a connector at the specified path
-    pub fn mount(
-        &self,
-        path: PathBuf,
-        connector: Arc<dyn Connector>,
-    ) -> Result<()> {
+    pub fn mount(&self, path: PathBuf, connector: Arc<dyn Connector>) -> Result<()> {
         info!("Mounting at {:?}", path);
 
         // Ensure mount point exists
@@ -105,8 +101,8 @@ impl MountManager {
         }
 
         // Mount in background
-        let session = fuser::spawn_mount2(adapter, &path, &options)
-            .map_err(|e| FuseAdapterError::Io(e))?;
+        let session =
+            fuser::spawn_mount2(adapter, &path, &options).map_err(|e| FuseAdapterError::Io(e))?;
 
         // Track the mount
         let active = ActiveMount::new(path.clone(), session);

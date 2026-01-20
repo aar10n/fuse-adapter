@@ -21,8 +21,8 @@ use tracing::{debug, trace};
 
 use crate::config::S3ConnectorConfig;
 use crate::connector::{
-    CacheRequirement, CacheRequirements, Capabilities, Connector, DirEntry,
-    DirEntryStream, Metadata,
+    CacheRequirement, CacheRequirements, Capabilities, Connector, DirEntry, DirEntryStream,
+    Metadata,
 };
 use crate::error::{FuseAdapterError, Result};
 
@@ -177,9 +177,7 @@ impl Connector for S3Connector {
                 let mtime = output
                     .last_modified()
                     .and_then(|dt| {
-                        SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(
-                            dt.secs() as u64
-                        ))
+                        SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(dt.secs() as u64))
                     })
                     .unwrap_or(SystemTime::now());
 
@@ -240,7 +238,10 @@ impl Connector for S3Connector {
             return Ok(Metadata::directory(SystemTime::now()));
         }
 
-        Err(FuseAdapterError::NotFound(format!("Path not found: {:?}", path)))
+        Err(FuseAdapterError::NotFound(format!(
+            "Path not found: {:?}",
+            path
+        )))
     }
 
     async fn exists(&self, path: &Path) -> Result<bool> {
@@ -253,7 +254,13 @@ impl Connector for S3Connector {
 
     async fn read(&self, path: &Path, offset: u64, size: u32) -> Result<Bytes> {
         let key = self.path_to_key(path);
-        trace!("read: path={:?} key={} offset={} size={}", path, key, offset, size);
+        trace!(
+            "read: path={:?} key={} offset={} size={}",
+            path,
+            key,
+            offset,
+            size
+        );
 
         let range = format!("bytes={}-{}", offset, offset + size as u64 - 1);
 
@@ -304,9 +311,7 @@ impl Connector for S3Connector {
             .body(ByteStream::from(data.to_vec()))
             .send()
             .await
-            .map_err(|e| {
-                FuseAdapterError::Backend(format!("S3 PutObject error: {}", e))
-            })?;
+            .map_err(|e| FuseAdapterError::Backend(format!("S3 PutObject error: {}", e)))?;
 
         Ok(data.len() as u64)
     }
@@ -323,9 +328,7 @@ impl Connector for S3Connector {
             .body(ByteStream::from(Vec::new()))
             .send()
             .await
-            .map_err(|e| {
-                FuseAdapterError::Backend(format!("S3 PutObject error: {}", e))
-            })?;
+            .map_err(|e| FuseAdapterError::Backend(format!("S3 PutObject error: {}", e)))?;
 
         Ok(())
     }
@@ -348,9 +351,7 @@ impl Connector for S3Connector {
             .body(ByteStream::from(Vec::new()))
             .send()
             .await
-            .map_err(|e| {
-                FuseAdapterError::Backend(format!("S3 PutObject error: {}", e))
-            })?;
+            .map_err(|e| FuseAdapterError::Backend(format!("S3 PutObject error: {}", e)))?;
 
         Ok(())
     }
@@ -365,9 +366,7 @@ impl Connector for S3Connector {
             .key(&key)
             .send()
             .await
-            .map_err(|e| {
-                FuseAdapterError::Backend(format!("S3 DeleteObject error: {}", e))
-            })?;
+            .map_err(|e| FuseAdapterError::Backend(format!("S3 DeleteObject error: {}", e)))?;
 
         Ok(())
     }
@@ -378,7 +377,10 @@ impl Connector for S3Connector {
             key.push('/');
         }
 
-        debug!("remove_dir: path={:?} key={} recursive={}", path, key, recursive);
+        debug!(
+            "remove_dir: path={:?} key={} recursive={}",
+            path, key, recursive
+        );
 
         if !recursive {
             // Check if directory is empty
@@ -569,7 +571,10 @@ impl Connector for S3Connector {
 
     async fn create_file_with_mode(&self, path: &Path, mode: u32) -> Result<()> {
         let key = self.path_to_key(path);
-        debug!("create_file_with_mode: path={:?} key={} mode={:o}", path, key, mode);
+        debug!(
+            "create_file_with_mode: path={:?} key={} mode={:o}",
+            path, key, mode
+        );
 
         self.client
             .put_object()
@@ -579,9 +584,7 @@ impl Connector for S3Connector {
             .set_metadata(Some(Self::mode_to_metadata(mode)))
             .send()
             .await
-            .map_err(|e| {
-                FuseAdapterError::Backend(format!("S3 PutObject error: {}", e))
-            })?;
+            .map_err(|e| FuseAdapterError::Backend(format!("S3 PutObject error: {}", e)))?;
 
         Ok(())
     }
@@ -592,7 +595,10 @@ impl Connector for S3Connector {
             key.push('/');
         }
 
-        debug!("create_dir_with_mode: path={:?} key={} mode={:o}", path, key, mode);
+        debug!(
+            "create_dir_with_mode: path={:?} key={} mode={:o}",
+            path, key, mode
+        );
 
         self.client
             .put_object()
@@ -602,9 +608,7 @@ impl Connector for S3Connector {
             .set_metadata(Some(Self::mode_to_metadata(mode)))
             .send()
             .await
-            .map_err(|e| {
-                FuseAdapterError::Backend(format!("S3 PutObject error: {}", e))
-            })?;
+            .map_err(|e| FuseAdapterError::Backend(format!("S3 PutObject error: {}", e)))?;
 
         Ok(())
     }
@@ -626,9 +630,7 @@ impl Connector for S3Connector {
             .set_metadata(Some(Self::mode_to_metadata(mode)))
             .send()
             .await
-            .map_err(|e| {
-                FuseAdapterError::Backend(format!("S3 CopyObject error: {}", e))
-            })?;
+            .map_err(|e| FuseAdapterError::Backend(format!("S3 CopyObject error: {}", e)))?;
 
         Ok(())
     }

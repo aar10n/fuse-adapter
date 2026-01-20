@@ -32,7 +32,10 @@ pub trait TokenProviderInner: Send + Sync {
     /// Returns `Ok(Some(token))` if a token is available,
     /// `Ok(None)` if no token is needed/available,
     /// or `Err` if token fetching failed.
-    async fn get_token(&self, scopes: &[&str]) -> Result<Option<String>, Box<dyn StdError + Send + Sync>>;
+    async fn get_token(
+        &self,
+        scopes: &[&str],
+    ) -> Result<Option<String>, Box<dyn StdError + Send + Sync>>;
 }
 
 /// Wrapper that implements google-apis-common's GetToken trait.
@@ -57,8 +60,13 @@ impl GetToken for TokenProviderWrapper {
     fn get_token<'a>(
         &'a self,
         scopes: &'a [&str],
-    ) -> Pin<Box<dyn Future<Output = Result<Option<String>, Box<dyn StdError + Send + Sync>>> + Send + 'a>>
-    {
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<Option<String>, Box<dyn StdError + Send + Sync>>>
+                + Send
+                + 'a,
+        >,
+    > {
         let inner = self.inner.clone();
         Box::pin(async move { inner.get_token(scopes).await })
     }

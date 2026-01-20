@@ -13,9 +13,7 @@ pub enum CacheConfig {
     /// No caching
     None,
     /// In-memory cache
-    Memory {
-        max_entries: Option<usize>,
-    },
+    Memory { max_entries: Option<usize> },
     /// Filesystem-backed cache
     Filesystem {
         path: String,

@@ -13,21 +13,6 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    services:
-      minio:
-        image: minio/minio:latest
-        ports:
-          - 9000:9000
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-        options: >-
-          --health-cmd "curl -f http://localhost:9000/minio/health/live || exit 1"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-          --entrypoint ""
-        # minio server needs to be started manually with entrypoint override
     steps:
       - name: Checkout
         uses: actions/checkout@v4

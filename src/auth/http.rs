@@ -89,10 +89,7 @@ impl HttpTokenProvider {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(format!(
-                "Token endpoint returned error {}: {}",
-                status, body
-            ).into());
+            return Err(format!("Token endpoint returned error {}: {}", status, body).into());
         }
 
         let token_response: TokenResponse = response.json().await?;
@@ -106,7 +103,10 @@ impl HttpTokenProvider {
 
 #[async_trait]
 impl TokenProviderInner for HttpTokenProvider {
-    async fn get_token(&self, _scopes: &[&str]) -> Result<Option<String>, Box<dyn StdError + Send + Sync>> {
+    async fn get_token(
+        &self,
+        _scopes: &[&str],
+    ) -> Result<Option<String>, Box<dyn StdError + Send + Sync>> {
         // Check if we have a valid cached token
         {
             let cache = self.cached_token.read();

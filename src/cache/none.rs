@@ -9,9 +9,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bytes::Bytes;
 
-use crate::connector::{
-    CacheRequirements, Capabilities, Connector, DirEntryStream, Metadata,
-};
+use crate::connector::{CacheRequirements, Capabilities, Connector, DirEntryStream, Metadata};
 use crate::error::Result;
 
 /// Passthrough connector that provides no caching

@@ -18,6 +18,25 @@ pub enum ErrorMode {
     Exit,
 }
 
+/// Status overlay configuration for virtual status directory
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct StatusOverlayConfig {
+    /// Virtual directory name (default: ".fuse-adapter")
+    pub prefix: String,
+    /// Maximum number of error log entries to retain (default: 1000)
+    pub max_log_entries: usize,
+}
+
+impl Default for StatusOverlayConfig {
+    fn default() -> Self {
+        Self {
+            prefix: ".fuse-adapter".to_string(),
+            max_log_entries: 1000,
+        }
+    }
+}
+
 // =============================================================================
 // Raw Config (Deserialized from YAML)
 // =============================================================================
@@ -129,6 +148,12 @@ pub struct RawMountConfig {
     /// Path where the filesystem will be mounted
     pub path: PathBuf,
 
+    /// Per-mount error mode (overrides global error_mode)
+    pub error_mode: Option<ErrorMode>,
+
+    /// Status overlay configuration (opt-in)
+    pub status_overlay: Option<StatusOverlayConfig>,
+
     /// Connector configuration (may be partial, inheriting from defaults)
     pub connector: MountConnectorConfig,
 
@@ -227,6 +252,12 @@ pub struct MountConfig {
     /// Path where the filesystem will be mounted
     pub path: PathBuf,
 
+    /// Error mode for this mount (resolved from per-mount or global)
+    pub error_mode: ErrorMode,
+
+    /// Status overlay configuration (None if not enabled)
+    pub status_overlay: Option<StatusOverlayConfig>,
+
     /// Connector configuration (fully resolved)
     pub connector: ConnectorConfig,
 
@@ -321,7 +352,7 @@ impl RawConfig {
         let mut resolved_mounts = Vec::with_capacity(mounts.len());
 
         for raw_mount in mounts {
-            let resolved = Self::resolve_mount(&connectors, raw_mount)?;
+            let resolved = Self::resolve_mount(&connectors, raw_mount, error_mode)?;
             resolved_mounts.push(resolved);
         }
 
@@ -335,7 +366,13 @@ impl RawConfig {
     fn resolve_mount(
         connectors: &ConnectorDefaults,
         raw: RawMountConfig,
+        global_error_mode: ErrorMode,
     ) -> Result<MountConfig, ConfigError> {
+        // Resolve per-mount error_mode with inheritance from global
+        let error_mode = raw.error_mode.unwrap_or(global_error_mode);
+        // Pass through status_overlay as-is (already has defaults via serde)
+        let status_overlay = raw.status_overlay;
+
         match raw.connector {
             MountConnectorConfig::S3(mount_s3) => {
                 let resolved_connector =
@@ -343,6 +380,8 @@ impl RawConfig {
                 let cache = Self::resolve_s3_cache(connectors, &raw.cache);
                 Ok(MountConfig {
                     path: raw.path,
+                    error_mode,
+                    status_overlay,
                     connector: ConnectorConfig::S3(resolved_connector),
                     cache,
                 })
@@ -353,6 +392,8 @@ impl RawConfig {
                 let cache = Self::resolve_gdrive_cache(connectors, &raw.cache);
                 Ok(MountConfig {
                     path: raw.path,
+                    error_mode,
+                    status_overlay,
                     connector: ConnectorConfig::GDrive(resolved_connector),
                     cache,
                 })
@@ -898,7 +939,10 @@ mounts:
                     } => {
                         assert_eq!(endpoint, "https://api.example.com/token");
                         assert_eq!(method, "POST");
-                        assert_eq!(headers.get("Authorization"), Some(&"Bearer my-token".to_string()));
+                        assert_eq!(
+                            headers.get("Authorization"),
+                            Some(&"Bearer my-token".to_string())
+                        );
                         assert_eq!(headers.get("X-User-Id"), Some(&"user-123".to_string()));
                     }
                     _ => panic!("Expected Http auth"),
@@ -925,7 +969,9 @@ mounts:
 
         match &config.mounts[0].connector {
             ConnectorConfig::GDrive(gdrive) => match &gdrive.auth {
-                GDriveAuthConfig::Http { method, headers, .. } => {
+                GDriveAuthConfig::Http {
+                    method, headers, ..
+                } => {
                     assert_eq!(method, "GET");
                     assert!(headers.is_empty());
                 }
@@ -985,7 +1031,10 @@ mounts:
         match &config.mounts[0].connector {
             ConnectorConfig::GDrive(gdrive) => match &gdrive.auth {
                 GDriveAuthConfig::Http { headers, .. } => {
-                    assert_eq!(headers.get("Authorization"), Some(&"Bearer secret_from_env".to_string()));
+                    assert_eq!(
+                        headers.get("Authorization"),
+                        Some(&"Bearer secret_from_env".to_string())
+                    );
                 }
                 _ => panic!("Expected Http auth"),
             },
@@ -1114,5 +1163,112 @@ mounts:
 
         let config = Config::from_str(yaml).unwrap();
         assert_eq!(config.error_mode, ErrorMode::Exit);
+    }
+
+    #[test]
+    fn test_per_mount_error_mode_override() {
+        let yaml = r#"
+error_mode: continue
+
+mounts:
+  - path: /mnt/critical
+    error_mode: exit
+    connector:
+      type: s3
+      bucket: production
+  - path: /mnt/optional
+    connector:
+      type: s3
+      bucket: cache
+"#;
+
+        let config = Config::from_str(yaml).unwrap();
+        assert_eq!(config.error_mode, ErrorMode::Continue); // Global default
+
+        // First mount overrides to exit
+        assert_eq!(config.mounts[0].error_mode, ErrorMode::Exit);
+        // Second mount inherits global default
+        assert_eq!(config.mounts[1].error_mode, ErrorMode::Continue);
+    }
+
+    #[test]
+    fn test_status_overlay_with_defaults() {
+        let yaml = r#"
+mounts:
+  - path: /mnt/data
+    status_overlay: {}
+    connector:
+      type: s3
+      bucket: my-bucket
+"#;
+
+        let config = Config::from_str(yaml).unwrap();
+        let overlay = config.mounts[0].status_overlay.as_ref().unwrap();
+        assert_eq!(overlay.prefix, ".fuse-adapter");
+        assert_eq!(overlay.max_log_entries, 1000);
+    }
+
+    #[test]
+    fn test_status_overlay_with_custom_values() {
+        let yaml = r#"
+mounts:
+  - path: /mnt/data
+    status_overlay:
+      prefix: ".status"
+      max_log_entries: 500
+    connector:
+      type: s3
+      bucket: my-bucket
+"#;
+
+        let config = Config::from_str(yaml).unwrap();
+        let overlay = config.mounts[0].status_overlay.as_ref().unwrap();
+        assert_eq!(overlay.prefix, ".status");
+        assert_eq!(overlay.max_log_entries, 500);
+    }
+
+    #[test]
+    fn test_status_overlay_not_present() {
+        let yaml = r#"
+mounts:
+  - path: /mnt/data
+    connector:
+      type: s3
+      bucket: my-bucket
+"#;
+
+        let config = Config::from_str(yaml).unwrap();
+        assert!(config.mounts[0].status_overlay.is_none());
+    }
+
+    #[test]
+    fn test_combined_per_mount_error_mode_and_status_overlay() {
+        let yaml = r#"
+error_mode: exit
+
+mounts:
+  - path: /mnt/critical
+    connector:
+      type: s3
+      bucket: production
+  - path: /mnt/optional
+    error_mode: continue
+    status_overlay:
+      prefix: ".health"
+    connector:
+      type: s3
+      bucket: cache
+"#;
+
+        let config = Config::from_str(yaml).unwrap();
+
+        // First mount inherits global exit mode, no overlay
+        assert_eq!(config.mounts[0].error_mode, ErrorMode::Exit);
+        assert!(config.mounts[0].status_overlay.is_none());
+
+        // Second mount overrides to continue with custom overlay
+        assert_eq!(config.mounts[1].error_mode, ErrorMode::Continue);
+        let overlay = config.mounts[1].status_overlay.as_ref().unwrap();
+        assert_eq!(overlay.prefix, ".health");
     }
 }

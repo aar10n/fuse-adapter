@@ -66,8 +66,9 @@ impl GDriveConnector {
             .build();
 
         // Create HTTP client
-        let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-            .build(https);
+        let client =
+            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+                .build(https);
 
         // Create Drive hub with token provider
         let hub = DriveHub::new(client, token_provider);
@@ -179,9 +180,7 @@ impl GDriveConnector {
                 .page_size(1)
                 .doit()
                 .await
-                .map_err(|e| {
-                    FuseAdapterError::Backend(format!("Drive API error: {}", e))
-                })?;
+                .map_err(|e| FuseAdapterError::Backend(format!("Drive API error: {}", e)))?;
 
             let files = result.1.files.unwrap_or_default();
             if files.is_empty() {
@@ -192,9 +191,10 @@ impl GDriveConnector {
             }
 
             let file = &files[0];
-            let file_id = file.id.clone().ok_or_else(|| {
-                FuseAdapterError::Backend("File has no ID".to_string())
-            })?;
+            let file_id = file
+                .id
+                .clone()
+                .ok_or_else(|| FuseAdapterError::Backend("File has no ID".to_string()))?;
 
             // Cache this path
             self.path_cache
@@ -393,9 +393,7 @@ impl Connector for GDriveConnector {
             .add_scope(Scope::Full)
             .upload(cursor, "application/octet-stream".parse().unwrap())
             .await
-            .map_err(|e| {
-                FuseAdapterError::Backend(format!("Drive upload error: {}", e))
-            })?;
+            .map_err(|e| FuseAdapterError::Backend(format!("Drive upload error: {}", e)))?;
 
         Ok(data.len() as u64)
     }
@@ -420,9 +418,7 @@ impl Connector for GDriveConnector {
             .add_scope(Scope::Full)
             .upload(cursor, "application/octet-stream".parse().unwrap())
             .await
-            .map_err(|e| {
-                FuseAdapterError::Backend(format!("Drive create error: {}", e))
-            })?;
+            .map_err(|e| FuseAdapterError::Backend(format!("Drive create error: {}", e)))?;
 
         // Cache the new file's ID
         if let Some(id) = result.1.id {
@@ -456,9 +452,7 @@ impl Connector for GDriveConnector {
             .add_scope(Scope::Full)
             .upload(cursor, FOLDER_MIME_TYPE.parse().unwrap())
             .await
-            .map_err(|e| {
-                FuseAdapterError::Backend(format!("Drive create folder error: {}", e))
-            })?;
+            .map_err(|e| FuseAdapterError::Backend(format!("Drive create folder error: {}", e)))?;
 
         // Cache the new folder's ID
         if let Some(id) = result.1.id {
@@ -480,9 +474,7 @@ impl Connector for GDriveConnector {
             .add_scope(Scope::Full)
             .doit()
             .await
-            .map_err(|e| {
-                FuseAdapterError::Backend(format!("Drive delete error: {}", e))
-            })?;
+            .map_err(|e| FuseAdapterError::Backend(format!("Drive delete error: {}", e)))?;
 
         self.invalidate_path(path);
         Ok(())
@@ -505,9 +497,7 @@ impl Connector for GDriveConnector {
                 .page_size(1)
                 .doit()
                 .await
-                .map_err(|e| {
-                    FuseAdapterError::Backend(format!("Drive API error: {}", e))
-                })?;
+                .map_err(|e| FuseAdapterError::Backend(format!("Drive API error: {}", e)))?;
 
             let files = result.1.files.unwrap_or_default();
             if !files.is_empty() {
@@ -525,9 +515,7 @@ impl Connector for GDriveConnector {
             .add_scope(Scope::Full)
             .doit()
             .await
-            .map_err(|e| {
-                FuseAdapterError::Backend(format!("Drive delete error: {}", e))
-            })?;
+            .map_err(|e| FuseAdapterError::Backend(format!("Drive delete error: {}", e)))?;
 
         self.invalidate_path_recursive(path);
         Ok(())
@@ -617,9 +605,7 @@ impl Connector for GDriveConnector {
             .add_scope(Scope::Full)
             .upload(cursor, "application/octet-stream".parse().unwrap())
             .await
-            .map_err(|e| {
-                FuseAdapterError::Backend(format!("Drive rename error: {}", e))
-            })?;
+            .map_err(|e| FuseAdapterError::Backend(format!("Drive rename error: {}", e)))?;
 
         // Invalidate cache for both paths
         self.invalidate_path_recursive(from);
@@ -701,9 +687,7 @@ impl GDriveConnectorInner {
                 .page_size(1)
                 .doit()
                 .await
-                .map_err(|e| {
-                    FuseAdapterError::Backend(format!("Drive API error: {}", e))
-                })?;
+                .map_err(|e| FuseAdapterError::Backend(format!("Drive API error: {}", e)))?;
 
             let files = result.1.files.unwrap_or_default();
             if files.is_empty() {
@@ -714,9 +698,10 @@ impl GDriveConnectorInner {
             }
 
             let file = &files[0];
-            current_id = file.id.clone().ok_or_else(|| {
-                FuseAdapterError::Backend("File has no ID".to_string())
-            })?;
+            current_id = file
+                .id
+                .clone()
+                .ok_or_else(|| FuseAdapterError::Backend("File has no ID".to_string()))?;
         }
 
         Ok(current_id)

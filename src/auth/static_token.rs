@@ -27,7 +27,10 @@ impl StaticTokenProvider {
 
 #[async_trait]
 impl TokenProviderInner for StaticTokenProvider {
-    async fn get_token(&self, _scopes: &[&str]) -> Result<Option<String>, Box<dyn StdError + Send + Sync>> {
+    async fn get_token(
+        &self,
+        _scopes: &[&str],
+    ) -> Result<Option<String>, Box<dyn StdError + Send + Sync>> {
         Ok(Some(self.token.clone()))
     }
 }

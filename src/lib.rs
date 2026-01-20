@@ -41,5 +41,6 @@ pub mod env;
 pub mod error;
 pub mod fuse;
 pub mod mount;
+pub mod overlay;
 
 pub use error::{FuseAdapterError, Result};
