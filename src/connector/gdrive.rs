@@ -46,8 +46,6 @@ pub struct GDriveConnector {
     root_folder_id: String,
     /// Cache mapping paths to file IDs
     path_cache: RwLock<HashMap<String, String>>,
-    /// Whether the mount is read-only
-    read_only: bool,
 }
 
 impl GDriveConnector {
@@ -82,7 +80,6 @@ impl GDriveConnector {
             hub: Arc::new(hub),
             root_folder_id: config.root_folder_id,
             path_cache: RwLock::new(path_cache),
-            read_only: config.read_only,
         })
     }
 
@@ -299,20 +296,16 @@ impl GDriveConnector {
 #[async_trait]
 impl Connector for GDriveConnector {
     fn capabilities(&self) -> Capabilities {
-        if self.read_only {
-            Capabilities::read_only()
-        } else {
-            Capabilities {
-                read: true,
-                write: true,
-                range_read: false, // Drive supports it but it's complex
-                random_write: false,
-                rename: true,
-                truncate: false,
-                set_mtime: false,
-                seekable: false,
-                set_mode: false, // Drive doesn't support POSIX permissions
-            }
+        Capabilities {
+            read: true,
+            write: true,
+            range_read: false, // Drive supports it but it's complex
+            random_write: false,
+            rename: true,
+            truncate: false,
+            set_mtime: false,
+            seekable: false,
+            set_mode: false, // Drive doesn't support POSIX permissions
         }
     }
 

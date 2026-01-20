@@ -45,7 +45,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             headers,
         },
         root_folder_id: "root".to_string(),
-        read_only: false,
     };
 
     println!("Creating GDrive connector...");

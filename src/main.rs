@@ -162,7 +162,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // Mount the filesystem
-        if let Err(e) = manager.mount(mount_config.path.clone(), connector) {
+        if let Err(e) = manager.mount(mount_config.path.clone(), connector, mount_config.read_only)
+        {
             error!("Failed to mount {:?}: {}", mount_config.path, e);
             if error_mode == ErrorMode::Exit {
                 std::process::exit(1);

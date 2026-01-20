@@ -31,7 +31,6 @@ pub struct S3Connector {
     client: Client,
     bucket: String,
     prefix: String,
-    read_only: bool,
 }
 
 impl S3Connector {
@@ -63,7 +62,6 @@ impl S3Connector {
             client,
             bucket: config.bucket,
             prefix,
-            read_only: config.read_only,
         })
     }
 
@@ -118,30 +116,16 @@ impl S3Connector {
 #[async_trait]
 impl Connector for S3Connector {
     fn capabilities(&self) -> Capabilities {
-        if self.read_only {
-            Capabilities {
-                read: true,
-                write: false,
-                range_read: true,
-                random_write: false,
-                rename: false,
-                truncate: false,
-                set_mtime: false,
-                seekable: false,
-                set_mode: false,
-            }
-        } else {
-            Capabilities {
-                read: true,
-                write: true,
-                range_read: true,
-                random_write: false, // S3 doesn't support partial writes
-                rename: false,       // S3 has no native rename
-                truncate: false,     // Can't truncate in S3
-                set_mtime: false,
-                seekable: false, // Range requests work but aren't cheap
-                set_mode: true,  // Stored in S3 user metadata
-            }
+        Capabilities {
+            read: true,
+            write: true,
+            range_read: true,
+            random_write: false, // S3 doesn't support partial writes
+            rename: false,       // S3 has no native rename
+            truncate: false,     // Can't truncate in S3
+            set_mtime: false,
+            seekable: false, // Range requests work but aren't cheap
+            set_mode: true,  // Stored in S3 user metadata
         }
     }
 

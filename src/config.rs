@@ -90,10 +90,6 @@ pub struct S3ConnectorDefaults {
     #[serde(default)]
     pub force_path_style: bool,
 
-    /// Mount as read-only by default (disables all write operations)
-    #[serde(default)]
-    pub read_only: bool,
-
     /// Default cache configuration for S3 mounts
     pub cache: Option<CacheConfig>,
 }
@@ -106,10 +102,6 @@ pub struct GDriveConnectorDefaults {
 
     /// Root folder ID (defaults to "root" for My Drive)
     pub root_folder_id: Option<String>,
-
-    /// Mount as read-only (disables all write operations)
-    #[serde(default)]
-    pub read_only: bool,
 
     /// Default cache configuration
     pub cache: Option<CacheConfig>,
@@ -151,6 +143,10 @@ pub struct RawMountConfig {
     /// Per-mount error mode (overrides global error_mode)
     pub error_mode: Option<ErrorMode>,
 
+    /// Mount as read-only (disables all write operations at FUSE level)
+    #[serde(default)]
+    pub read_only: bool,
+
     /// Status overlay configuration (opt-in)
     pub status_overlay: Option<StatusOverlayConfig>,
 
@@ -191,9 +187,6 @@ pub struct S3MountConnectorConfig {
 
     /// Force path-style addressing
     pub force_path_style: Option<bool>,
-
-    /// Mount as read-only (disables all write operations)
-    pub read_only: Option<bool>,
 }
 
 /// Google Drive mount connector - all fields optional
@@ -204,9 +197,6 @@ pub struct GDriveMountConnectorConfig {
 
     /// Root folder ID (defaults to "root" for My Drive)
     pub root_folder_id: Option<String>,
-
-    /// Mount as read-only (disables all write operations)
-    pub read_only: Option<bool>,
 }
 
 // =============================================================================
@@ -255,6 +245,9 @@ pub struct MountConfig {
     /// Error mode for this mount (resolved from per-mount or global)
     pub error_mode: ErrorMode,
 
+    /// Mount as read-only (disables all write operations at FUSE level)
+    pub read_only: bool,
+
     /// Status overlay configuration (None if not enabled)
     pub status_overlay: Option<StatusOverlayConfig>,
 
@@ -292,9 +285,6 @@ pub struct S3ConnectorConfig {
 
     /// Force path-style addressing (for MinIO, LocalStack, etc.)
     pub force_path_style: bool,
-
-    /// Mount as read-only (disables all write operations)
-    pub read_only: bool,
 }
 
 /// Google Drive connector configuration (fully resolved)
@@ -305,9 +295,6 @@ pub struct GDriveConnectorConfig {
 
     /// Root folder ID (defaults to "root" for My Drive)
     pub root_folder_id: String,
-
-    /// Mount as read-only (disables all write operations)
-    pub read_only: bool,
 }
 
 /// Resolved authentication configuration for Google Drive.
@@ -370,6 +357,8 @@ impl RawConfig {
     ) -> Result<MountConfig, ConfigError> {
         // Resolve per-mount error_mode with inheritance from global
         let error_mode = raw.error_mode.unwrap_or(global_error_mode);
+        // read_only is specified directly on the mount (defaults to false via serde)
+        let read_only = raw.read_only;
         // Pass through status_overlay as-is (already has defaults via serde)
         let status_overlay = raw.status_overlay;
 
@@ -381,6 +370,7 @@ impl RawConfig {
                 Ok(MountConfig {
                     path: raw.path,
                     error_mode,
+                    read_only,
                     status_overlay,
                     connector: ConnectorConfig::S3(resolved_connector),
                     cache,
@@ -393,6 +383,7 @@ impl RawConfig {
                 Ok(MountConfig {
                     path: raw.path,
                     error_mode,
+                    read_only,
                     status_overlay,
                     connector: ConnectorConfig::GDrive(resolved_connector),
                     cache,
@@ -446,10 +437,6 @@ impl RawConfig {
                 .force_path_style
                 .or_else(|| defaults.map(|d| d.force_path_style))
                 .unwrap_or(false),
-            read_only: mount
-                .read_only
-                .or_else(|| defaults.map(|d| d.read_only))
-                .unwrap_or(false),
         })
     }
 
@@ -496,15 +483,9 @@ impl RawConfig {
             .or_else(|| defaults.and_then(|d| d.root_folder_id.clone()))
             .unwrap_or_else(|| "root".to_string());
 
-        let read_only = mount
-            .read_only
-            .or_else(|| defaults.map(|d| d.read_only))
-            .unwrap_or(false);
-
         Ok(GDriveConnectorConfig {
             auth,
             root_folder_id,
-            read_only,
         })
     }
 
@@ -839,15 +820,15 @@ mounts:
 
     #[test]
     fn test_read_only_mount() {
-        // Test read_only can be set at mount level and inherits from defaults
+        // Test read_only is a mount-level option
         let yaml = r#"
 connectors:
   s3:
     bucket: default-bucket
-    read_only: true
 
 mounts:
   - path: /mnt/readonly
+    read_only: true
     connector:
       type: s3
       prefix: "ro/"
@@ -855,27 +836,16 @@ mounts:
     connector:
       type: s3
       prefix: "rw/"
-      read_only: false
 "#;
 
         let config = Config::parse(yaml).unwrap();
         assert_eq!(config.mounts.len(), 2);
 
-        // First mount inherits read_only from defaults
-        match &config.mounts[0].connector {
-            ConnectorConfig::S3(s3) => {
-                assert!(s3.read_only);
-            }
-            _ => panic!("Expected S3 connector"),
-        }
+        // First mount is read-only
+        assert!(config.mounts[0].read_only);
 
-        // Second mount overrides read_only to false
-        match &config.mounts[1].connector {
-            ConnectorConfig::S3(s3) => {
-                assert!(!s3.read_only);
-            }
-            _ => panic!("Expected S3 connector"),
-        }
+        // Second mount defaults to writable
+        assert!(!config.mounts[1].read_only);
     }
 
     #[test]

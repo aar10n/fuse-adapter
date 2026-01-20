@@ -62,7 +62,15 @@ impl MountManager {
     }
 
     /// Mount a connector at the specified path
-    pub fn mount(&self, path: PathBuf, connector: Arc<dyn Connector>) -> Result<()> {
+    ///
+    /// If `read_only` is true, the mount will be read-only at the FUSE level,
+    /// preventing any write operations regardless of connector capabilities.
+    pub fn mount(
+        &self,
+        path: PathBuf,
+        connector: Arc<dyn Connector>,
+        read_only: bool,
+    ) -> Result<()> {
         info!("Mounting at {:?}", path);
 
         // Ensure mount point exists
@@ -80,9 +88,6 @@ impl MountManager {
             )));
         }
 
-        // Check if connector is read-only
-        let is_read_only = !connector.capabilities().write;
-
         // Create the FUSE adapter
         let adapter = FuseAdapter::new(connector, self.handle.clone());
 
@@ -94,8 +99,8 @@ impl MountManager {
             MountOption::DefaultPermissions,
         ];
 
-        // Add read-only mount option if connector doesn't support writes
-        if is_read_only {
+        // Add read-only mount option if configured
+        if read_only {
             info!("Mounting {:?} as read-only", path);
             options.push(MountOption::RO);
         }

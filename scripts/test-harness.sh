@@ -177,10 +177,10 @@ mounts:
       max_size: "256MB"
       flush_interval: 5s
   - path: ${MOUNT_PATH_RO}
+    read_only: true
     connector:
       type: s3
       prefix: "ro/"
-      read_only: true
     cache:
       type: filesystem
       path: ${CACHE_PATH_RO}
