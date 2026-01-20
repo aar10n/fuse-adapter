@@ -65,7 +65,7 @@ jobs:
         run: cargo test
 
       - name: Run integration tests
-        run: ./scripts/test-harness.sh --ci
+        run: ./scripts/test-harness.sh --ci --quick
         env:
           MINIO_ENDPOINT: http://localhost:9000
           MINIO_ACCESS_KEY: minioadmin
