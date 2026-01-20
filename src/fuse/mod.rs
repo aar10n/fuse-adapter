@@ -628,11 +628,10 @@ impl Filesystem for FuseAdapter {
         // Add . and ..
         let mut idx = 0i64;
 
-        if offset <= idx
-            && reply.add(ino, idx + 1, FuseFileType::Directory, ".") {
-                reply.ok();
-                return;
-            }
+        if offset <= idx && reply.add(ino, idx + 1, FuseFileType::Directory, ".") {
+            reply.ok();
+            return;
+        }
         idx += 1;
 
         if offset <= idx {

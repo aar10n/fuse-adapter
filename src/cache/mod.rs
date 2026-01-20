@@ -28,7 +28,6 @@ pub enum CacheConfig {
     },
 }
 
-
 /// Parse size string like "1GB" to bytes
 pub fn parse_size(s: &str) -> Option<u64> {
     let s = s.trim().to_uppercase();
