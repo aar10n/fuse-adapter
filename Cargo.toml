@@ -1,6 +1,6 @@
 [package]
 name = "fuse-adapter"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 description = "A FUSE filesystem framework with pluggable connector architecture"
 license = "MIT"

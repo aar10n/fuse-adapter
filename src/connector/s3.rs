@@ -634,10 +634,7 @@ impl Connector for S3Connector {
                     // Try with trailing slash for directories
                     let dir_key = format!("{}/", key);
                     let dir_copy_source = format!("{}/{}", self.bucket, dir_key);
-                    debug!(
-                        "set_mode: retrying as directory with key={}",
-                        dir_key
-                    );
+                    debug!("set_mode: retrying as directory with key={}", dir_key);
 
                     self.client
                         .copy_object()
