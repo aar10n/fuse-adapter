@@ -18,11 +18,17 @@ TESTS_DIR="${SCRIPT_DIR}/tests"
 MOUNT_BASE="${TEST_MOUNT_BASE:-/tmp/fuse-adapter-test}"
 MOUNT_PATH="${MOUNT_BASE}/mnt"
 MOUNT_PATH_RO="${MOUNT_BASE}/mnt-ro"
+MOUNT_PATH_UIDGID="${MOUNT_BASE}/mnt-uidgid"
 CACHE_PATH="${MOUNT_BASE}/cache"
 CACHE_PATH_RO="${MOUNT_BASE}/cache-ro"
+CACHE_PATH_UIDGID="${MOUNT_BASE}/cache-uidgid"
 CONFIG_PATH="${MOUNT_BASE}/config.yaml"
 PID_FILE="${MOUNT_BASE}/adapter.pid"
 LOG_FILE="${MOUNT_BASE}/adapter.log"
+
+# UID/GID for testing (use 1000 which is typical for first non-root user)
+TEST_UID=1000
+TEST_GID=1000
 
 MINIO_ENDPOINT="${MINIO_ENDPOINT:-http://localhost:9000}"
 MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-minioadmin}"
@@ -98,8 +104,8 @@ cleanup() {
         rm -f "${PID_FILE}"
     fi
 
-    # Force unmount both mounts
-    for mp in "${MOUNT_PATH}" "${MOUNT_PATH_RO}"; do
+    # Force unmount all mounts
+    for mp in "${MOUNT_PATH}" "${MOUNT_PATH_RO}" "${MOUNT_PATH_UIDGID}"; do
         if mountpoint -q "${mp}" 2>/dev/null; then
             log_debug "Unmounting ${mp}..."
             umount "${mp}" 2>/dev/null || \
@@ -153,7 +159,8 @@ setup_minio() {
 generate_config() {
     log_info "Generating test configuration..."
 
-    mkdir -p "${MOUNT_PATH}" "${MOUNT_PATH_RO}" "${CACHE_PATH}" "${CACHE_PATH_RO}"
+    mkdir -p "${MOUNT_PATH}" "${MOUNT_PATH_RO}" "${MOUNT_PATH_UIDGID}" \
+             "${CACHE_PATH}" "${CACHE_PATH_RO}" "${CACHE_PATH_UIDGID}"
 
     cat > "${CONFIG_PATH}" <<EOF
 logging:
@@ -184,6 +191,17 @@ mounts:
     cache:
       type: filesystem
       path: ${CACHE_PATH_RO}
+      max_size: "256MB"
+      flush_interval: 5s
+  - path: ${MOUNT_PATH_UIDGID}
+    uid: ${TEST_UID}
+    gid: ${TEST_GID}
+    connector:
+      type: s3
+      prefix: "uidgid/"
+    cache:
+      type: filesystem
+      path: ${CACHE_PATH_UIDGID}
       max_size: "256MB"
       flush_interval: 5s
 EOF
@@ -225,16 +243,19 @@ wait_for_mount() {
     for i in {1..30}; do
         mounts_ready=0
 
-        # Check if both mount points are accessible
+        # Check if all mount points are accessible
         if ls "${MOUNT_PATH}" >/dev/null 2>&1; then
             ((mounts_ready++)) || true
         fi
         if ls "${MOUNT_PATH_RO}" >/dev/null 2>&1; then
             ((mounts_ready++)) || true
         fi
+        if ls "${MOUNT_PATH_UIDGID}" >/dev/null 2>&1; then
+            ((mounts_ready++)) || true
+        fi
 
-        if [[ ${mounts_ready} -ge 2 ]]; then
-            log_info "Mounts ready at ${MOUNT_PATH} and ${MOUNT_PATH_RO}"
+        if [[ ${mounts_ready} -ge 3 ]]; then
+            log_info "Mounts ready at ${MOUNT_PATH}, ${MOUNT_PATH_RO}, and ${MOUNT_PATH_UIDGID}"
             return 0
         fi
 
@@ -264,6 +285,9 @@ run_tests() {
     # Export mount paths for test scripts
     export MOUNT_PATH
     export MOUNT_PATH_RO
+    export MOUNT_PATH_UIDGID
+    export EXPECTED_UID="${TEST_UID}"
+    export EXPECTED_GID="${TEST_GID}"
     export TEST_PASSED
     export TEST_FAILED
 

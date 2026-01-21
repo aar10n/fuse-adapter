@@ -35,7 +35,7 @@ fn to_fuse_file_type(ft: FileType) -> FuseFileType {
 }
 
 /// Convert Metadata to FileAttr
-fn metadata_to_attr(ino: u64, meta: &Metadata) -> FileAttr {
+fn metadata_to_attr(ino: u64, meta: &Metadata, uid: u32, gid: u32) -> FileAttr {
     let kind = to_fuse_file_type(meta.file_type);
     let perm = meta.mode_or_default() as u16;
     let nlink = if meta.is_dir() { 2 } else { 1 };
@@ -52,8 +52,8 @@ fn metadata_to_attr(ino: u64, meta: &Metadata) -> FileAttr {
         kind,
         perm,
         nlink,
-        uid: unsafe { libc::getuid() },
-        gid: unsafe { libc::getgid() },
+        uid,
+        gid,
         rdev: 0,
         blksize: BLOCK_SIZE,
         flags: 0,
@@ -66,11 +66,26 @@ pub struct FuseAdapter {
     inodes: InodeTable,
     /// Dedicated runtime for FUSE async operations
     runtime: tokio::runtime::Runtime,
+    /// User ID to report for all files (defaults to process uid)
+    uid: u32,
+    /// Group ID to report for all files (defaults to process gid)
+    gid: u32,
 }
 
 impl FuseAdapter {
     /// Create a new FuseAdapter wrapping the given connector
-    pub fn new(connector: Arc<dyn Connector>, _handle: Handle) -> Self {
+    ///
+    /// # Arguments
+    /// * `connector` - The connector to delegate operations to
+    /// * `_handle` - Tokio runtime handle (unused, kept for API compatibility)
+    /// * `uid` - Optional user ID to report for all files (defaults to process uid)
+    /// * `gid` - Optional group ID to report for all files (defaults to process gid)
+    pub fn new(
+        connector: Arc<dyn Connector>,
+        _handle: Handle,
+        uid: Option<u32>,
+        gid: Option<u32>,
+    ) -> Self {
         // Create a dedicated multi-threaded runtime for FUSE operations
         // This ensures async I/O is properly driven without interference
         let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -79,10 +94,16 @@ impl FuseAdapter {
             .build()
             .expect("Failed to create FUSE runtime");
 
+        // Use configured uid/gid or fall back to process owner
+        let uid = uid.unwrap_or_else(|| unsafe { libc::getuid() });
+        let gid = gid.unwrap_or_else(|| unsafe { libc::getgid() });
+
         Self {
             connector,
             inodes: InodeTable::new(),
             runtime,
+            uid,
+            gid,
         }
     }
 
@@ -148,7 +169,7 @@ impl Filesystem for FuseAdapter {
         match self.run_async(async move { connector.stat(&path_for_async).await }) {
             Ok(meta) => {
                 let ino = self.inodes.get_or_create_inode(&path);
-                let attr = metadata_to_attr(ino, &meta);
+                let attr = metadata_to_attr(ino, &meta, self.uid, self.gid);
                 reply.entry(&ATTR_TTL, &attr, GENERATION);
             }
             Err(FuseAdapterError::NotFound(_)) => {
@@ -176,7 +197,7 @@ impl Filesystem for FuseAdapter {
         let path_for_async = path.clone();
         match self.run_async(async move { connector.stat(&path_for_async).await }) {
             Ok(meta) => {
-                let attr = metadata_to_attr(ino, &meta);
+                let attr = metadata_to_attr(ino, &meta, self.uid, self.gid);
                 reply.attr(&ATTR_TTL, &attr);
             }
             Err(e) => {
@@ -230,7 +251,7 @@ impl Filesystem for FuseAdapter {
                 connector.stat(&path_for_async).await
             }) {
                 Ok(meta) => {
-                    let attr = metadata_to_attr(ino, &meta);
+                    let attr = metadata_to_attr(ino, &meta, self.uid, self.gid);
                     reply.attr(&ATTR_TTL, &attr);
                 }
                 Err(e) => {
@@ -256,7 +277,7 @@ impl Filesystem for FuseAdapter {
                 connector.stat(&path).await
             }) {
                 Ok(meta) => {
-                    let attr = metadata_to_attr(ino, &meta);
+                    let attr = metadata_to_attr(ino, &meta, self.uid, self.gid);
                     reply.attr(&ATTR_TTL, &attr);
                 }
                 Err(e) => {
@@ -388,7 +409,7 @@ impl Filesystem for FuseAdapter {
         }) {
             Ok(meta) => {
                 let ino = self.inodes.get_or_create_inode(&path);
-                let attr = metadata_to_attr(ino, &meta);
+                let attr = metadata_to_attr(ino, &meta, self.uid, self.gid);
                 reply.created(&ATTR_TTL, &attr, GENERATION, 0, 0);
             }
             Err(e) => {
@@ -435,7 +456,7 @@ impl Filesystem for FuseAdapter {
         }) {
             Ok(meta) => {
                 let ino = self.inodes.get_or_create_inode(&path);
-                let attr = metadata_to_attr(ino, &meta);
+                let attr = metadata_to_attr(ino, &meta, self.uid, self.gid);
                 reply.entry(&ATTR_TTL, &attr, GENERATION);
             }
             Err(e) => {

@@ -147,6 +147,12 @@ pub struct RawMountConfig {
     #[serde(default)]
     pub read_only: bool,
 
+    /// User ID to report for all files (defaults to process uid)
+    pub uid: Option<u32>,
+
+    /// Group ID to report for all files (defaults to process gid)
+    pub gid: Option<u32>,
+
     /// Status overlay configuration (opt-in)
     pub status_overlay: Option<StatusOverlayConfig>,
 
@@ -247,6 +253,12 @@ pub struct MountConfig {
 
     /// Mount as read-only (disables all write operations at FUSE level)
     pub read_only: bool,
+
+    /// User ID to report for all files (None = use process uid)
+    pub uid: Option<u32>,
+
+    /// Group ID to report for all files (None = use process gid)
+    pub gid: Option<u32>,
 
     /// Status overlay configuration (None if not enabled)
     pub status_overlay: Option<StatusOverlayConfig>,
@@ -371,6 +383,8 @@ impl RawConfig {
                     path: raw.path,
                     error_mode,
                     read_only,
+                    uid: raw.uid,
+                    gid: raw.gid,
                     status_overlay,
                     connector: ConnectorConfig::S3(resolved_connector),
                     cache,
@@ -384,6 +398,8 @@ impl RawConfig {
                     path: raw.path,
                     error_mode,
                     read_only,
+                    uid: raw.uid,
+                    gid: raw.gid,
                     status_overlay,
                     connector: ConnectorConfig::GDrive(resolved_connector),
                     cache,
@@ -1240,5 +1256,49 @@ mounts:
         assert_eq!(config.mounts[1].error_mode, ErrorMode::Continue);
         let overlay = config.mounts[1].status_overlay.as_ref().unwrap();
         assert_eq!(overlay.prefix, ".health");
+    }
+
+    #[test]
+    fn test_uid_gid_configuration() {
+        let yaml = r#"
+mounts:
+  - path: /mnt/with-owner
+    uid: 1000
+    gid: 1000
+    connector:
+      type: s3
+      bucket: my-bucket
+  - path: /mnt/default-owner
+    connector:
+      type: s3
+      bucket: my-bucket
+"#;
+
+        let config = Config::parse(yaml).unwrap();
+        assert_eq!(config.mounts.len(), 2);
+
+        // First mount has explicit uid/gid
+        assert_eq!(config.mounts[0].uid, Some(1000));
+        assert_eq!(config.mounts[0].gid, Some(1000));
+
+        // Second mount has no uid/gid (will use process defaults)
+        assert_eq!(config.mounts[1].uid, None);
+        assert_eq!(config.mounts[1].gid, None);
+    }
+
+    #[test]
+    fn test_uid_only_configuration() {
+        let yaml = r#"
+mounts:
+  - path: /mnt/data
+    uid: 500
+    connector:
+      type: s3
+      bucket: my-bucket
+"#;
+
+        let config = Config::parse(yaml).unwrap();
+        assert_eq!(config.mounts[0].uid, Some(500));
+        assert_eq!(config.mounts[0].gid, None);
     }
 }

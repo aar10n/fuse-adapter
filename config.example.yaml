@@ -40,6 +40,16 @@ connectors:
 # Each mount can either:
 # 1. Use connector defaults (just specify type + any overrides)
 # 2. Provide full connector config (for different buckets, etc.)
+#
+# Mount-level options:
+# - path: Mount point directory (required)
+# - read_only: Mount as read-only (default: false)
+# - uid: User ID reported for all files (default: process uid)
+# - gid: Group ID reported for all files (default: process gid)
+# - error_mode: "continue" or "exit" (overrides global setting)
+# - status_overlay: Virtual status directory configuration
+# - connector: Storage backend configuration (required)
+# - cache: Cache layer configuration (inherits from connector defaults)
 
 mounts:
   # --- Using Connector Defaults ---
@@ -129,3 +139,21 @@ mounts:
   #     auth:
   #       type: token
   #       access_token: "ya29.your_access_token_here"
+
+  # --- Kubernetes Sidecar Example ---
+  # When running fuse-adapter as a sidecar container in Kubernetes, you may need
+  # to configure uid/gid so that the main container's user can access the mount.
+  #
+  # For example, if your main container runs as user 'sandbox' with uid 1000,
+  # configure the mount to report files as owned by that user:
+  #
+  # - path: /mnt/shared-data
+  #   uid: 1000
+  #   gid: 1000
+  #   connector:
+  #     type: s3
+  #     bucket: my-bucket
+  #     prefix: "sandbox-data/"
+  #   cache:
+  #     type: filesystem
+  #     path: /var/cache/fuse-adapter/shared

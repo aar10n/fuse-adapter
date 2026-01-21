@@ -65,11 +65,16 @@ impl MountManager {
     ///
     /// If `read_only` is true, the mount will be read-only at the FUSE level,
     /// preventing any write operations regardless of connector capabilities.
+    ///
+    /// The `uid` and `gid` parameters configure the owner reported for all files.
+    /// If `None`, the process's uid/gid will be used.
     pub fn mount(
         &self,
         path: PathBuf,
         connector: Arc<dyn Connector>,
         read_only: bool,
+        uid: Option<u32>,
+        gid: Option<u32>,
     ) -> Result<()> {
         info!("Mounting at {:?}", path);
 
@@ -89,7 +94,7 @@ impl MountManager {
         }
 
         // Create the FUSE adapter
-        let adapter = FuseAdapter::new(connector, self.handle.clone());
+        let adapter = FuseAdapter::new(connector, self.handle.clone(), uid, gid);
 
         // Configure mount options
         let mut options = vec![
