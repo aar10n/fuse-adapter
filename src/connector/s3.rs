@@ -602,10 +602,14 @@ impl Connector for S3Connector {
         debug!("set_mode: path={:?} key={} mode={:o}", path, key, mode);
 
         // S3 doesn't allow updating metadata in place, so we need to copy the object
-        // to itself with new metadata
+        // to itself with new metadata.
+        //
+        // First, try the key as-is (for files). If that fails, try with trailing
+        // slash (for directories, which are stored with trailing slashes in S3).
         let copy_source = format!("{}/{}", self.bucket, key);
 
-        self.client
+        let result = self
+            .client
             .copy_object()
             .bucket(&self.bucket)
             .key(&key)
@@ -613,9 +617,49 @@ impl Connector for S3Connector {
             .metadata_directive(aws_sdk_s3::types::MetadataDirective::Replace)
             .set_metadata(Some(Self::mode_to_metadata(mode)))
             .send()
-            .await
-            .map_err(|e| FuseAdapterError::Backend(format!("S3 CopyObject error: {}", e)))?;
+            .await;
 
-        Ok(())
+        match result {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                // Check if this might be a directory (key with trailing slash)
+                let service_error = e.into_service_error();
+                use aws_sdk_s3::error::ProvideErrorMetadata;
+                let is_not_found = service_error
+                    .code()
+                    .map(|c| c == "NoSuchKey" || c == "404" || c == "NotFound")
+                    .unwrap_or(false);
+
+                if is_not_found {
+                    // Try with trailing slash for directories
+                    let dir_key = format!("{}/", key);
+                    let dir_copy_source = format!("{}/{}", self.bucket, dir_key);
+                    debug!(
+                        "set_mode: retrying as directory with key={}",
+                        dir_key
+                    );
+
+                    self.client
+                        .copy_object()
+                        .bucket(&self.bucket)
+                        .key(&dir_key)
+                        .copy_source(&dir_copy_source)
+                        .metadata_directive(aws_sdk_s3::types::MetadataDirective::Replace)
+                        .set_metadata(Some(Self::mode_to_metadata(mode)))
+                        .send()
+                        .await
+                        .map_err(|e| {
+                            FuseAdapterError::Backend(format!("S3 CopyObject error: {}", e))
+                        })?;
+
+                    Ok(())
+                } else {
+                    Err(FuseAdapterError::Backend(format!(
+                        "S3 CopyObject error: {}",
+                        service_error
+                    )))
+                }
+            }
+        }
     }
 }

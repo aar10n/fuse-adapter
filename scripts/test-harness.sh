@@ -34,6 +34,7 @@ MINIO_ENDPOINT="${MINIO_ENDPOINT:-http://localhost:9000}"
 MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-minioadmin}"
 MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-minioadmin}"
 TEST_BUCKET="${TEST_BUCKET:-integration-test-$(date +%s)}"
+MINIO_CONTAINER="${MINIO_CONTAINER:-fuse-adapter-minio}"
 
 # Colors
 RED='\033[0;31m'
@@ -117,8 +118,8 @@ cleanup() {
     # Clean bucket (only if we created it)
     if ! $CI_MODE; then
         log_debug "Cleaning bucket ${TEST_BUCKET}..."
-        docker exec fuse-adapter-minio mc rm --recursive --force "local/${TEST_BUCKET}/" 2>/dev/null || true
-        docker exec fuse-adapter-minio mc rb "local/${TEST_BUCKET}" 2>/dev/null || true
+        docker exec "${MINIO_CONTAINER}" mc rm --recursive --force "local/${TEST_BUCKET}/" 2>/dev/null || true
+        docker exec "${MINIO_CONTAINER}" mc rb "local/${TEST_BUCKET}" 2>/dev/null || true
     fi
 
     # Remove temp directories
@@ -151,8 +152,8 @@ setup_minio() {
 
     # Create test bucket
     log_info "Creating test bucket: ${TEST_BUCKET}"
-    docker exec fuse-adapter-minio mc alias set local http://localhost:9000 "${MINIO_ACCESS_KEY}" "${MINIO_SECRET_KEY}" >/dev/null 2>&1 || true
-    docker exec fuse-adapter-minio mc mb --ignore-existing "local/${TEST_BUCKET}" >/dev/null 2>&1 || true
+    docker exec "${MINIO_CONTAINER}" mc alias set local http://localhost:9000 "${MINIO_ACCESS_KEY}" "${MINIO_SECRET_KEY}" >/dev/null 2>&1 || true
+    docker exec "${MINIO_CONTAINER}" mc mb --ignore-existing "local/${TEST_BUCKET}" >/dev/null 2>&1 || true
 }
 
 # Generate test configuration
