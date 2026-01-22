@@ -8,7 +8,7 @@
 #   make run-s3
 
 logging:
-  level: debug
+  level: info
 
 connectors:
   s3:

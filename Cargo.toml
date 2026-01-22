@@ -63,6 +63,7 @@ ctrlc = "3"
 # Utilities
 libc = "0.2"
 parking_lot = "0.12"
+scopeguard = "1.2.0"
 
 [dev-dependencies]
 tempfile = "3"

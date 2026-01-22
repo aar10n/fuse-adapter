@@ -224,7 +224,10 @@ fn wrap_with_cache<C: Connector + 'static>(
                 flush_interval: flush_interval.unwrap_or(std::time::Duration::from_secs(30)),
                 metadata_ttl: std::time::Duration::from_secs(60),
             };
-            Ok(Arc::new(FilesystemCache::new(connector, config)))
+            let cache = Arc::new(FilesystemCache::new(connector, config));
+            // Start background sync task for write-back caching
+            cache.start_background_sync();
+            Ok(cache)
         }
     }
 }
