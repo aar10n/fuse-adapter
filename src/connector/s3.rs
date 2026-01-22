@@ -168,6 +168,26 @@ impl Connector for S3Connector {
                     })
                     .unwrap_or(SystemTime::now());
 
+                // Check for directory marker (s3proxy compatibility)
+                // Some S3-compatible backends (like s3proxy with filesystem-nio2) return
+                // ContentType: application/x-directory with ContentLength: 0 for directories
+                if size == 0 {
+                    if let Some(content_type) = output.content_type() {
+                        if content_type == "application/x-directory" {
+                            let mode = output
+                                .metadata()
+                                .and_then(|m| m.get(S3_MODE_METADATA_KEY))
+                                .and_then(|v| u32::from_str_radix(v, 8).ok());
+
+                            return Ok(if let Some(mode) = mode {
+                                Metadata::directory_with_mode(mtime, mode)
+                            } else {
+                                Metadata::directory(mtime)
+                            });
+                        }
+                    }
+                }
+
                 // Check for symlink metadata first
                 if output
                     .metadata()
