@@ -2,7 +2,7 @@ pub mod gdrive;
 pub mod s3;
 
 use std::ffi::OsString;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::time::{Duration, SystemTime};
 
@@ -17,12 +17,15 @@ use crate::error::Result;
 pub enum FileType {
     File,
     Directory,
+    Symlink,
 }
 
 /// Default file mode (rw-r--r--)
 pub const DEFAULT_FILE_MODE: u32 = 0o644;
 /// Default directory mode (rwxr-xr-x)
 pub const DEFAULT_DIR_MODE: u32 = 0o755;
+/// Default symlink mode (rwxrwxrwx) - symlinks always have 0o777 on Unix
+pub const DEFAULT_SYMLINK_MODE: u32 = 0o777;
 
 /// Metadata for a file or directory
 #[derive(Debug, Clone)]
@@ -71,12 +74,30 @@ impl Metadata {
         }
     }
 
+    pub fn symlink(mtime: SystemTime) -> Self {
+        Self {
+            file_type: FileType::Symlink,
+            size: 0,
+            mtime,
+            mode: None,
+        }
+    }
+
+    pub fn symlink_with_mode(mtime: SystemTime, mode: u32) -> Self {
+        Self {
+            file_type: FileType::Symlink,
+            size: 0,
+            mtime,
+            mode: Some(mode),
+        }
+    }
+
     /// Get the mode, using defaults if not set
     pub fn mode_or_default(&self) -> u32 {
-        self.mode.unwrap_or(if self.is_dir() {
-            DEFAULT_DIR_MODE
-        } else {
-            DEFAULT_FILE_MODE
+        self.mode.unwrap_or(match self.file_type {
+            FileType::Directory => DEFAULT_DIR_MODE,
+            FileType::Symlink => DEFAULT_SYMLINK_MODE,
+            FileType::File => DEFAULT_FILE_MODE,
         })
     }
 
@@ -86,6 +107,10 @@ impl Metadata {
 
     pub fn is_dir(&self) -> bool {
         matches!(self.file_type, FileType::Directory)
+    }
+
+    pub fn is_symlink(&self) -> bool {
+        matches!(self.file_type, FileType::Symlink)
     }
 }
 
@@ -108,6 +133,13 @@ impl DirEntry {
         Self {
             name: name.into(),
             file_type: FileType::Directory,
+        }
+    }
+
+    pub fn symlink(name: impl Into<OsString>) -> Self {
+        Self {
+            name: name.into(),
+            file_type: FileType::Symlink,
         }
     }
 }
@@ -133,6 +165,8 @@ pub struct Capabilities {
     pub seekable: bool,
     /// Can store and retrieve POSIX file modes
     pub set_mode: bool,
+    /// Supports symbolic links
+    pub symlink: bool,
 }
 
 impl Capabilities {
@@ -148,6 +182,7 @@ impl Capabilities {
             set_mtime: true,
             seekable: true,
             set_mode: true,
+            symlink: true,
         }
     }
 
@@ -163,6 +198,7 @@ impl Capabilities {
             set_mtime: false,
             seekable: true,
             set_mode: false,
+            symlink: false,
         }
     }
 }
@@ -289,6 +325,28 @@ pub trait Connector: Send + Sync {
     async fn set_mode(&self, _path: &Path, _mode: u32) -> Result<()> {
         Err(crate::error::FuseAdapterError::NotSupported(
             "set_mode not supported".to_string(),
+        ))
+    }
+
+    /// Read the target of a symbolic link
+    ///
+    /// Default implementation returns NotSupported
+    async fn readlink(&self, _path: &Path) -> Result<PathBuf> {
+        Err(crate::error::FuseAdapterError::NotSupported(
+            "readlink not supported".to_string(),
+        ))
+    }
+
+    /// Create a symbolic link
+    ///
+    /// # Arguments
+    /// * `target` - The target path the symlink should point to
+    /// * `link_path` - The path where the symlink should be created
+    ///
+    /// Default implementation returns NotSupported
+    async fn symlink(&self, _target: &Path, _link_path: &Path) -> Result<()> {
+        Err(crate::error::FuseAdapterError::NotSupported(
+            "symlink not supported".to_string(),
         ))
     }
 }

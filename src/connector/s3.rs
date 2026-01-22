@@ -4,11 +4,13 @@
 //! backends (MinIO, LocalStack, etc.).
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 /// S3 metadata key for storing POSIX file mode
 const S3_MODE_METADATA_KEY: &str = "posix-mode";
+/// S3 metadata key for storing symlink target
+const S3_SYMLINK_METADATA_KEY: &str = "symlink-target";
 
 use async_stream::try_stream;
 use async_trait::async_trait;
@@ -126,6 +128,7 @@ impl Connector for S3Connector {
             set_mtime: false,
             seekable: false, // Range requests work but aren't cheap
             set_mode: true,  // Stored in S3 user metadata
+            symlink: true,   // Stored as empty objects with symlink-target metadata
         }
     }
 
@@ -164,6 +167,25 @@ impl Connector for S3Connector {
                         SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(dt.secs() as u64))
                     })
                     .unwrap_or(SystemTime::now());
+
+                // Check for symlink metadata first
+                if output
+                    .metadata()
+                    .and_then(|m| m.get(S3_SYMLINK_METADATA_KEY))
+                    .is_some()
+                {
+                    // Read mode from S3 user metadata
+                    let mode = output
+                        .metadata()
+                        .and_then(|m| m.get(S3_MODE_METADATA_KEY))
+                        .and_then(|v| u32::from_str_radix(v, 8).ok());
+
+                    return Ok(if let Some(mode) = mode {
+                        Metadata::symlink_with_mode(mtime, mode)
+                    } else {
+                        Metadata::symlink(mtime)
+                    });
+                }
 
                 // Read mode from S3 user metadata
                 let mode = output
@@ -658,5 +680,62 @@ impl Connector for S3Connector {
                 }
             }
         }
+    }
+
+    async fn readlink(&self, path: &Path) -> Result<PathBuf> {
+        let key = self.path_to_key(path);
+        debug!("readlink: path={:?} key={}", path, key);
+
+        let head_result = self
+            .client
+            .head_object()
+            .bucket(&self.bucket)
+            .key(&key)
+            .send()
+            .await
+            .map_err(|e| {
+                let service_error = e.into_service_error();
+                if service_error.is_not_found() {
+                    FuseAdapterError::NotFound(format!("Symlink not found: {:?}", path))
+                } else {
+                    FuseAdapterError::Backend(format!("S3 HeadObject error: {}", service_error))
+                }
+            })?;
+
+        // Extract the symlink target from metadata
+        let target = head_result
+            .metadata()
+            .and_then(|m| m.get(S3_SYMLINK_METADATA_KEY))
+            .ok_or_else(|| {
+                FuseAdapterError::InvalidArgument(format!("Not a symlink: {:?}", path))
+            })?;
+
+        Ok(PathBuf::from(target))
+    }
+
+    async fn symlink(&self, target: &Path, link_path: &Path) -> Result<()> {
+        let key = self.path_to_key(link_path);
+        let target_str = target.to_string_lossy().to_string();
+        debug!(
+            "symlink: target={:?} link_path={:?} key={}",
+            target, link_path, key
+        );
+
+        // Create metadata with symlink target
+        let mut metadata = HashMap::new();
+        metadata.insert(S3_SYMLINK_METADATA_KEY.to_string(), target_str);
+
+        // Create empty object with symlink metadata
+        self.client
+            .put_object()
+            .bucket(&self.bucket)
+            .key(&key)
+            .body(ByteStream::from(Vec::new()))
+            .set_metadata(Some(metadata))
+            .send()
+            .await
+            .map_err(|e| FuseAdapterError::Backend(format!("S3 PutObject error: {}", e)))?;
+
+        Ok(())
     }
 }

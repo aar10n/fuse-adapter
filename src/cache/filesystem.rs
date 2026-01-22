@@ -404,6 +404,8 @@ impl<C: Connector + 'static> Connector for FilesystemCache<C> {
         // Cache layer can always store mode locally, even if backend doesn't support it
         // (mode will be preserved in cache and written to backend if supported)
         caps.set_mode = true;
+        // Symlink capability is passed through from inner connector
+        // (symlinks are not cached, they go directly to backend)
         caps
     }
 
@@ -713,6 +715,16 @@ impl<C: Connector + 'static> Connector for FilesystemCache<C> {
         }
 
         Ok(())
+    }
+
+    async fn readlink(&self, path: &Path) -> Result<PathBuf> {
+        // Symlinks are not cached, pass through to backend
+        self.inner.readlink(path).await
+    }
+
+    async fn symlink(&self, target: &Path, link_path: &Path) -> Result<()> {
+        // Symlinks go straight to backend
+        self.inner.symlink(target, link_path).await
     }
 }
 

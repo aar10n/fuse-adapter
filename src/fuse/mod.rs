@@ -1,7 +1,7 @@
 pub mod inode;
 
 use std::ffi::OsStr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -31,6 +31,7 @@ fn to_fuse_file_type(ft: FileType) -> FuseFileType {
     match ft {
         FileType::File => FuseFileType::RegularFile,
         FileType::Directory => FuseFileType::Directory,
+        FileType::Symlink => FuseFileType::Symlink,
     }
 }
 
@@ -136,6 +137,13 @@ impl FuseAdapter {
 
     fn check_set_mode_capability(&self) -> Result<(), i32> {
         if !self.connector.capabilities().set_mode {
+            return Err(libc::ENOSYS);
+        }
+        Ok(())
+    }
+
+    fn check_symlink_capability(&self) -> Result<(), i32> {
+        if !self.connector.capabilities().symlink {
             return Err(libc::ENOSYS);
         }
         Ok(())
@@ -785,6 +793,79 @@ impl Filesystem for FuseAdapter {
             255,        // namelen
             BLOCK_SIZE, // frsize
         );
+    }
+
+    fn readlink(&mut self, _req: &Request<'_>, ino: u64, reply: ReplyData) {
+        let path = match self.inode_to_path(ino) {
+            Ok(p) => p,
+            Err(e) => {
+                reply.error(e);
+                return;
+            }
+        };
+
+        trace!("readlink: {:?} (ino={})", path, ino);
+
+        let connector = self.connector.clone();
+        let path_for_async = path.clone();
+        match self.run_async(async move { connector.readlink(&path_for_async).await }) {
+            Ok(target) => {
+                // Return the target path as bytes
+                let target_bytes = target.as_os_str().as_encoded_bytes();
+                reply.data(target_bytes);
+            }
+            Err(e) => {
+                error!("readlink error for {:?}: {}", path, e);
+                reply.error(e.to_errno());
+            }
+        }
+    }
+
+    fn symlink(
+        &mut self,
+        _req: &Request<'_>,
+        parent: u64,
+        link_name: &OsStr,
+        target: &Path,
+        reply: ReplyEntry,
+    ) {
+        if let Err(e) = self.check_write_capability() {
+            reply.error(e);
+            return;
+        }
+        if let Err(e) = self.check_symlink_capability() {
+            reply.error(e);
+            return;
+        }
+
+        let parent_path = match self.inode_to_path(parent) {
+            Ok(p) => p,
+            Err(e) => {
+                reply.error(e);
+                return;
+            }
+        };
+
+        let link_path = parent_path.join(link_name);
+        debug!("symlink: {:?} -> {:?}", link_path, target);
+
+        let connector = self.connector.clone();
+        let target_path = target.to_path_buf();
+        let link_path_for_async = link_path.clone();
+        match self.run_async(async move {
+            connector.symlink(&target_path, &link_path_for_async).await?;
+            connector.stat(&link_path_for_async).await
+        }) {
+            Ok(meta) => {
+                let ino = self.inodes.get_or_create_inode(&link_path);
+                let attr = metadata_to_attr(ino, &meta, self.uid, self.gid);
+                reply.entry(&ATTR_TTL, &attr, GENERATION);
+            }
+            Err(e) => {
+                error!("symlink error for {:?}: {}", link_path, e);
+                reply.error(e.to_errno());
+            }
+        }
     }
 }
 

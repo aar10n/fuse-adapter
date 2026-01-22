@@ -3,9 +3,9 @@
 # Helpful recipes for development, testing, and running connectors
 
 .PHONY: help build release test clean
-.PHONY: minio-start minio-stop minio-clean minio-setup minio-logs minio-shell
-.PHONY: localstack-start localstack-stop localstack-setup localstack-logs
-.PHONY: run-s3 run-s3-localstack
+.PHONY: minio-start minio-stop minio-clean minio-setup minio-logs minio-shell minio-ensure-bucket
+.PHONY: localstack-start localstack-stop localstack-setup localstack-logs localstack-ensure-bucket
+.PHONY: run-s3 run-s3-localstack run-s3-release
 .PHONY: mount-dirs unmount test-s3 test-read test-write
 .PHONY: test-integration test-integration-quick test-integration-ci
 
@@ -123,10 +123,18 @@ minio-setup: ## Create test bucket in MinIO
 		sleep 1; \
 	done
 	@echo "Creating bucket '$(TEST_BUCKET)'..."
-	@docker exec $(MINIO_CONTAINER) mc alias set local http://localhost:9000 $(MINIO_ROOT_USER) $(MINIO_ROOT_PASSWORD) >/dev/null 2>&1 || true
-	@docker exec $(MINIO_CONTAINER) mc mb local/$(TEST_BUCKET) 2>/dev/null || \
-		docker exec $(MINIO_CONTAINER) mc ls local/$(TEST_BUCKET) >/dev/null 2>&1 || \
-		(echo "$(RED)Failed to create bucket$(NC)" && exit 1)
+	@if docker ps --filter name=$(MINIO_CONTAINER) --format "{{.Names}}" | grep -q $(MINIO_CONTAINER); then \
+		docker exec $(MINIO_CONTAINER) mc alias set local http://localhost:9000 $(MINIO_ROOT_USER) $(MINIO_ROOT_PASSWORD) && \
+		docker exec $(MINIO_CONTAINER) mc mb --ignore-existing local/$(TEST_BUCKET); \
+	elif command -v mc >/dev/null 2>&1; then \
+		mc alias set local http://localhost:$(MINIO_PORT) $(MINIO_ROOT_USER) $(MINIO_ROOT_PASSWORD) && \
+		mc mb --ignore-existing local/$(TEST_BUCKET); \
+	elif command -v aws >/dev/null 2>&1; then \
+		AWS_ACCESS_KEY_ID=$(MINIO_ROOT_USER) AWS_SECRET_ACCESS_KEY=$(MINIO_ROOT_PASSWORD) \
+		aws --endpoint-url=http://localhost:$(MINIO_PORT) s3 mb s3://$(TEST_BUCKET) 2>/dev/null || true; \
+	else \
+		echo "$(RED)No mc or aws CLI available to create bucket$(NC)" && exit 1; \
+	fi
 	@echo "$(GREEN)Bucket '$(TEST_BUCKET)' ready$(NC)"
 
 minio-logs: ## Show MinIO container logs
@@ -137,6 +145,18 @@ minio-shell: ## Open shell in MinIO container
 
 minio-status: ## Check MinIO status
 	@docker ps --filter name=$(MINIO_CONTAINER) --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | head -2 || echo "$(RED)MinIO not running$(NC)"
+
+minio-ensure-bucket: ## Ensure MinIO is running and bucket exists
+	@if curl -sf http://localhost:$(MINIO_PORT)/minio/health/live >/dev/null 2>&1; then \
+		echo "$(GREEN)MinIO already running on port $(MINIO_PORT)$(NC)"; \
+	elif docker ps --filter name=$(MINIO_CONTAINER) --format "{{.Names}}" | grep -q $(MINIO_CONTAINER); then \
+		echo "$(GREEN)MinIO container running$(NC)"; \
+	else \
+		echo "$(YELLOW)MinIO not running, starting...$(NC)"; \
+		$(MAKE) minio-start; \
+		sleep 2; \
+	fi
+	@$(MAKE) minio-setup
 
 #-----------------------------------------------------------------------------
 # LocalStack
@@ -170,6 +190,14 @@ localstack-setup: ## Create test bucket in LocalStack
 localstack-logs: ## Show LocalStack container logs
 	docker logs -f $(LOCALSTACK_CONTAINER)
 
+localstack-ensure-bucket: ## Ensure LocalStack is running and bucket exists
+	@if ! docker ps --filter name=$(LOCALSTACK_CONTAINER) --format "{{.Names}}" | grep -q $(LOCALSTACK_CONTAINER); then \
+		echo "$(YELLOW)LocalStack not running, starting...$(NC)"; \
+		$(MAKE) localstack-start; \
+		sleep 3; \
+	fi
+	@$(MAKE) localstack-setup
+
 #-----------------------------------------------------------------------------
 # Mount directories
 #-----------------------------------------------------------------------------
@@ -192,22 +220,20 @@ unmount: ## Unmount all fuse-adapter mounts
 # Run
 #-----------------------------------------------------------------------------
 
-run-s3: mount-dirs ## Run with S3/MinIO config
+run-s3: mount-dirs minio-ensure-bucket ## Run with S3/MinIO config
 	@echo "$(GREEN)Starting fuse-adapter with MinIO...$(NC)"
-	@echo "$(YELLOW)Make sure MinIO is running: make minio-start minio-setup$(NC)"
 	AWS_ACCESS_KEY_ID=$(MINIO_ROOT_USER) \
 	AWS_SECRET_ACCESS_KEY=$(MINIO_ROOT_PASSWORD) \
 	cargo run -- config/s3.yaml
 
-run-s3-release: mount-dirs build-release ## Run release build with S3/MinIO
+run-s3-release: mount-dirs minio-ensure-bucket build-release ## Run release build with S3/MinIO
 	@echo "$(GREEN)Starting fuse-adapter (release) with MinIO...$(NC)"
 	AWS_ACCESS_KEY_ID=$(MINIO_ROOT_USER) \
 	AWS_SECRET_ACCESS_KEY=$(MINIO_ROOT_PASSWORD) \
 	./target/release/fuse-adapter config/s3.yaml
 
-run-s3-localstack: mount-dirs ## Run with LocalStack config
+run-s3-localstack: mount-dirs localstack-ensure-bucket ## Run with LocalStack config
 	@echo "$(GREEN)Starting fuse-adapter with LocalStack...$(NC)"
-	@echo "$(YELLOW)Make sure LocalStack is running: make localstack-start localstack-setup$(NC)"
 	AWS_ACCESS_KEY_ID=test \
 	AWS_SECRET_ACCESS_KEY=test \
 	cargo run -- config/s3-localstack.yaml
