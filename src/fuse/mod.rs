@@ -853,7 +853,9 @@ impl Filesystem for FuseAdapter {
         let target_path = target.to_path_buf();
         let link_path_for_async = link_path.clone();
         match self.run_async(async move {
-            connector.symlink(&target_path, &link_path_for_async).await?;
+            connector
+                .symlink(&target_path, &link_path_for_async)
+                .await?;
             connector.stat(&link_path_for_async).await
         }) {
             Ok(meta) => {

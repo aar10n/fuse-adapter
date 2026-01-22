@@ -305,8 +305,8 @@ impl Connector for GDriveConnector {
             truncate: false,
             set_mtime: false,
             seekable: false,
-            set_mode: false,  // Drive doesn't support POSIX permissions
-            symlink: false,   // Drive doesn't support symlinks
+            set_mode: false, // Drive doesn't support POSIX permissions
+            symlink: false,  // Drive doesn't support symlinks
         }
     }
 

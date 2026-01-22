@@ -479,8 +479,9 @@ impl<C: Connector + 'static> FilesystemCache<C> {
             return Ok(None);
         }
 
-        let target = std::fs::read_to_string(&meta_path)
-            .map_err(|e| FuseAdapterError::Cache(format!("Failed to read symlink metadata: {}", e)))?;
+        let target = std::fs::read_to_string(&meta_path).map_err(|e| {
+            FuseAdapterError::Cache(format!("Failed to read symlink metadata: {}", e))
+        })?;
 
         Ok(Some(PathBuf::from(target)))
     }
@@ -852,7 +853,10 @@ impl<C: Connector + 'static> FilesystemCache<C> {
             }
         }
 
-        info!("Sync complete, {} changes remaining", self.pending_changes.len());
+        info!(
+            "Sync complete, {} changes remaining",
+            self.pending_changes.len()
+        );
         Ok(())
     }
 
@@ -1022,7 +1026,10 @@ impl<C: Connector + 'static> Connector for FilesystemCache<C> {
 
         // OPTIMIZATION: If any ancestor is a pending new directory, path can't exist on backend
         if self.has_pending_new_ancestor(path) {
-            trace!("stat: path {:?} has pending new ancestor, skipping backend", path);
+            trace!(
+                "stat: path {:?} has pending new ancestor, skipping backend",
+                path
+            );
             return Err(FuseAdapterError::NotFound(
                 path.to_string_lossy().to_string(),
             ));
@@ -1084,7 +1091,10 @@ impl<C: Connector + 'static> Connector for FilesystemCache<C> {
 
         // OPTIMIZATION: If any ancestor is a pending new directory, path can't exist on backend
         if self.has_pending_new_ancestor(path) {
-            trace!("exists: path {:?} has pending new ancestor, skipping backend", path);
+            trace!(
+                "exists: path {:?} has pending new ancestor, skipping backend",
+                path
+            );
             return Ok(false);
         }
 
@@ -1197,8 +1207,7 @@ impl<C: Connector + 'static> Connector for FilesystemCache<C> {
                     .collect();
 
                 // Add pending creates (avoiding duplicates)
-                let existing_names: HashSet<_> =
-                    entries.iter().map(|e| e.name.clone()).collect();
+                let existing_names: HashSet<_> = entries.iter().map(|e| e.name.clone()).collect();
                 for entry in pending_entries {
                     if !existing_names.contains(&entry.name) {
                         entries.push(entry);
