@@ -67,7 +67,6 @@ enum PendingChangeType {
 #[derive(Debug, Clone)]
 struct PendingChange {
     change_type: PendingChangeType,
-    created_at: Instant,
     /// File mode if applicable
     mode: Option<u32>,
 }
@@ -133,7 +132,7 @@ impl<C: Connector + 'static> FilesystemCache<C> {
             );
         }
 
-        let cache = Self {
+        Self {
             inner: Arc::new(connector),
             config,
             pending_changes: DashMap::new(),
@@ -144,9 +143,7 @@ impl<C: Connector + 'static> FilesystemCache<C> {
             cache_size: RwLock::new(0),
             shutdown: Arc::new(Notify::new()),
             sync_running: Arc::new(RwLock::new(false)),
-        };
-
-        cache
+        }
     }
 
     /// Start the background sync task
@@ -213,7 +210,7 @@ impl<C: Connector + 'static> FilesystemCache<C> {
 
     /// Check if path has a pending delete
     fn is_pending_delete(&self, path: &Path) -> bool {
-        self.pending_changes.get(path).map_or(false, |change| {
+        self.pending_changes.get(path).is_some_and(|change| {
             matches!(
                 change.change_type,
                 PendingChangeType::DeletedFile | PendingChangeType::DeletedDirectory
@@ -223,7 +220,7 @@ impl<C: Connector + 'static> FilesystemCache<C> {
 
     /// Check if path has a pending create (file, dir, or symlink)
     fn is_pending_create(&self, path: &Path) -> bool {
-        self.pending_changes.get(path).map_or(false, |change| {
+        self.pending_changes.get(path).is_some_and(|change| {
             matches!(
                 change.change_type,
                 PendingChangeType::NewFile
@@ -238,9 +235,11 @@ impl<C: Connector + 'static> FilesystemCache<C> {
     fn has_pending_new_ancestor(&self, path: &Path) -> bool {
         let mut current = path.parent();
         while let Some(parent) = current {
-            if self.pending_changes.get(parent).map_or(false, |c| {
-                matches!(c.change_type, PendingChangeType::NewDirectory)
-            }) {
+            if self
+                .pending_changes
+                .get(parent)
+                .is_some_and(|c| matches!(c.change_type, PendingChangeType::NewDirectory))
+            {
                 return true;
             }
             current = parent.parent();
@@ -250,9 +249,9 @@ impl<C: Connector + 'static> FilesystemCache<C> {
 
     /// Check if path is in negative cache (known not to exist on backend)
     fn is_negative_cached(&self, path: &Path) -> bool {
-        self.negative_cache.get(path).map_or(false, |entry| {
-            entry.cached_at.elapsed() < self.config.metadata_ttl
-        })
+        self.negative_cache
+            .get(path)
+            .is_some_and(|entry| entry.cached_at.elapsed() < self.config.metadata_ttl)
     }
 
     /// Add path to negative cache
@@ -335,7 +334,6 @@ impl<C: Connector + 'static> FilesystemCache<C> {
             })
             .or_insert(PendingChange {
                 change_type: PendingChangeType::ModifiedFile,
-                created_at: Instant::now(),
                 mode: None,
             });
 
@@ -369,7 +367,6 @@ impl<C: Connector + 'static> FilesystemCache<C> {
             path.to_path_buf(),
             PendingChange {
                 change_type: PendingChangeType::NewFile,
-                created_at: Instant::now(),
                 mode,
             },
         );
@@ -412,7 +409,6 @@ impl<C: Connector + 'static> FilesystemCache<C> {
             path.to_path_buf(),
             PendingChange {
                 change_type: PendingChangeType::NewDirectory,
-                created_at: Instant::now(),
                 mode,
             },
         );
@@ -455,7 +451,6 @@ impl<C: Connector + 'static> FilesystemCache<C> {
                 change_type: PendingChangeType::NewSymlink {
                     target: target.to_path_buf(),
                 },
-                created_at: Instant::now(),
                 mode: None,
             },
         );
@@ -537,7 +532,6 @@ impl<C: Connector + 'static> FilesystemCache<C> {
             path.to_path_buf(),
             PendingChange {
                 change_type,
-                created_at: Instant::now(),
                 mode: None,
             },
         );
@@ -576,7 +570,6 @@ impl<C: Connector + 'static> FilesystemCache<C> {
                 })
                 .or_insert(PendingChange {
                     change_type: PendingChangeType::ModifiedFile,
-                    created_at: Instant::now(),
                     mode: None,
                 });
         }
@@ -906,13 +899,13 @@ impl<C: Connector + 'static> FilesystemCache<C> {
             let path = entry.key();
 
             if let Some(parent) = path.parent() {
-                if parent == dir {
-                    if matches!(
+                if parent == dir
+                    && matches!(
                         entry.value().change_type,
                         PendingChangeType::DeletedFile | PendingChangeType::DeletedDirectory
-                    ) {
-                        deletes.insert(path.clone());
-                    }
+                    )
+                {
+                    deletes.insert(path.clone());
                 }
             }
         }
@@ -1143,10 +1136,12 @@ impl<C: Connector + 'static> Connector for FilesystemCache<C> {
 
     async fn write(&self, path: &Path, offset: u64, data: &[u8]) -> Result<u64> {
         // If file doesn't exist in cache and we're writing at non-zero offset, fetch first
-        if !self.is_cached(path) && offset > 0 && !self.is_pending_create(path) {
-            if self.inner.stat(path).await.is_ok() {
-                self.fetch_to_cache(path).await?;
-            }
+        if !self.is_cached(path)
+            && offset > 0
+            && !self.is_pending_create(path)
+            && self.inner.stat(path).await.is_ok()
+        {
+            self.fetch_to_cache(path).await?;
         }
 
         // Write to local cache only
@@ -1181,9 +1176,10 @@ impl<C: Connector + 'static> Connector for FilesystemCache<C> {
         let pending_deletes = self.get_pending_deletes_for_dir(path);
 
         // Check if we have pending directory entries (new local dir with entries)
-        let is_pending_dir = self.pending_changes.get(path).map_or(false, |c| {
-            matches!(c.change_type, PendingChangeType::NewDirectory)
-        });
+        let is_pending_dir = self
+            .pending_changes
+            .get(path)
+            .is_some_and(|c| matches!(c.change_type, PendingChangeType::NewDirectory));
 
         // If it's a pending new directory, just return pending entries
         if is_pending_dir {
@@ -1299,7 +1295,6 @@ impl<C: Connector + 'static> Connector for FilesystemCache<C> {
                 from.to_path_buf(),
                 PendingChange {
                     change_type: PendingChangeType::DeletedFile,
-                    created_at: Instant::now(),
                     mode: None,
                 },
             );
@@ -1307,7 +1302,6 @@ impl<C: Connector + 'static> Connector for FilesystemCache<C> {
                 to.to_path_buf(),
                 PendingChange {
                     change_type: PendingChangeType::NewFile,
-                    created_at: Instant::now(),
                     mode: self.mode_cache.get(from).map(|r| *r),
                 },
             );
