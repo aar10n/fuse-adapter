@@ -8,6 +8,7 @@
 .PHONY: run-s3 run-s3-localstack run-s3-release
 .PHONY: mount-dirs unmount test-s3 test-read test-write
 .PHONY: test-integration test-integration-quick test-integration-ci
+.PHONY: test-e2e test-e2e-s3 test-e2e-cache test-e2e-quick bench bench-read bench-write bench-metadata
 
 # Configuration
 MINIO_CONTAINER := fuse-adapter-minio
@@ -329,3 +330,79 @@ test-integration-ci: ## Run integration tests in CI mode (MinIO already running)
 
 test-all: test test-integration ## Run all tests (unit + integration)
 	@echo "$(GREEN)All tests complete!$(NC)"
+
+#-----------------------------------------------------------------------------
+# E2E Tests (Rust-based)
+#-----------------------------------------------------------------------------
+
+.PHONY: test-e2e test-e2e-s3 test-e2e-cache test-e2e-quick bench bench-read bench-write bench-metadata
+
+test-e2e: release minio-ensure-bucket ## Run all Rust e2e tests
+	@echo "$(GREEN)Running Rust e2e tests...$(NC)"
+	MINIO_ENDPOINT=http://localhost:$(MINIO_PORT) \
+	MINIO_ACCESS_KEY=$(MINIO_ROOT_USER) \
+	MINIO_SECRET_KEY=$(MINIO_ROOT_PASSWORD) \
+	cargo test -p fuse-adapter-e2e --test '*' -- --test-threads=1
+
+test-e2e-s3: release minio-ensure-bucket ## Run S3 connector e2e tests
+	@echo "$(GREEN)Running S3 e2e tests...$(NC)"
+	MINIO_ENDPOINT=http://localhost:$(MINIO_PORT) \
+	MINIO_ACCESS_KEY=$(MINIO_ROOT_USER) \
+	MINIO_SECRET_KEY=$(MINIO_ROOT_PASSWORD) \
+	cargo test -p fuse-adapter-e2e --test 's3_*' -- --test-threads=1
+
+test-e2e-cache: release minio-ensure-bucket ## Run cache e2e tests
+	@echo "$(GREEN)Running cache e2e tests...$(NC)"
+	MINIO_ENDPOINT=http://localhost:$(MINIO_PORT) \
+	MINIO_ACCESS_KEY=$(MINIO_ROOT_USER) \
+	MINIO_SECRET_KEY=$(MINIO_ROOT_PASSWORD) \
+	cargo test -p fuse-adapter-e2e --test 'cache_*' -- --test-threads=1
+
+test-e2e-quick: release minio-ensure-bucket ## Run quick e2e smoke tests
+	@echo "$(GREEN)Running quick e2e tests...$(NC)"
+	MINIO_ENDPOINT=http://localhost:$(MINIO_PORT) \
+	MINIO_ACCESS_KEY=$(MINIO_ROOT_USER) \
+	MINIO_SECRET_KEY=$(MINIO_ROOT_PASSWORD) \
+	cargo test -p fuse-adapter-e2e --test 's3_crud' -- --test-threads=1
+
+test-e2e-mount-config: release minio-ensure-bucket ## Run mount configuration tests
+	@echo "$(GREEN)Running mount configuration e2e tests...$(NC)"
+	MINIO_ENDPOINT=http://localhost:$(MINIO_PORT) \
+	MINIO_ACCESS_KEY=$(MINIO_ROOT_USER) \
+	MINIO_SECRET_KEY=$(MINIO_ROOT_PASSWORD) \
+	cargo test -p fuse-adapter-e2e --test 'mount_config' -- --test-threads=1
+
+test-e2e-fuse: release minio-ensure-bucket ## Run FUSE semantics tests
+	@echo "$(GREEN)Running FUSE semantics e2e tests...$(NC)"
+	MINIO_ENDPOINT=http://localhost:$(MINIO_PORT) \
+	MINIO_ACCESS_KEY=$(MINIO_ROOT_USER) \
+	MINIO_SECRET_KEY=$(MINIO_ROOT_PASSWORD) \
+	cargo test -p fuse-adapter-e2e --test 'fuse_semantics' -- --test-threads=1
+
+test-e2e-cache-limits: release minio-ensure-bucket ## Run cache eviction and limits tests
+	@echo "$(GREEN)Running cache limits e2e tests...$(NC)"
+	MINIO_ENDPOINT=http://localhost:$(MINIO_PORT) \
+	MINIO_ACCESS_KEY=$(MINIO_ROOT_USER) \
+	MINIO_SECRET_KEY=$(MINIO_ROOT_PASSWORD) \
+	cargo test -p fuse-adapter-e2e --test 'cache_limits' -- --test-threads=1
+
+bench: release minio-ensure-bucket mount-dirs ## Run all benchmarks
+	@echo "$(GREEN)Running benchmarks...$(NC)"
+	@echo "$(YELLOW)Note: Requires mounted FUSE filesystem at $(S3_MOUNT)$(NC)"
+	FUSE_MOUNT_PATH=$(S3_MOUNT) \
+	cargo bench -p fuse-adapter-e2e
+
+bench-read: release ## Run read benchmarks
+	@echo "$(GREEN)Running read benchmarks...$(NC)"
+	FUSE_MOUNT_PATH=$(S3_MOUNT) \
+	cargo bench -p fuse-adapter-e2e --bench read
+
+bench-write: release ## Run write benchmarks
+	@echo "$(GREEN)Running write benchmarks...$(NC)"
+	FUSE_MOUNT_PATH=$(S3_MOUNT) \
+	cargo bench -p fuse-adapter-e2e --bench write
+
+bench-metadata: release ## Run metadata benchmarks
+	@echo "$(GREEN)Running metadata benchmarks...$(NC)"
+	FUSE_MOUNT_PATH=$(S3_MOUNT) \
+	cargo bench -p fuse-adapter-e2e --bench metadata

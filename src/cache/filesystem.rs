@@ -1164,7 +1164,56 @@ impl<C: Connector + 'static> Connector for FilesystemCache<C> {
         Ok(())
     }
 
-    async fn remove_dir(&self, path: &Path, _recursive: bool) -> Result<()> {
+    async fn remove_dir(&self, path: &Path, recursive: bool) -> Result<()> {
+        if !recursive {
+            // Check if directory has any pending non-deleted children
+            let pending_entries = self.get_pending_entries_for_dir(path);
+            if !pending_entries.is_empty() {
+                return Err(FuseAdapterError::NotEmpty(format!(
+                    "Directory not empty: {:?}",
+                    path
+                )));
+            }
+
+            // Check cached entries (filtering out pending deletes)
+            let pending_deletes = self.get_pending_deletes_for_dir(path);
+            if let Some(cached) = self.dir_cache.get(path) {
+                let has_entries = cached.entries.iter().any(|e| {
+                    let entry_path = path.join(&e.name);
+                    !pending_deletes.contains(&entry_path)
+                });
+                if has_entries {
+                    return Err(FuseAdapterError::NotEmpty(format!(
+                        "Directory not empty: {:?}",
+                        path
+                    )));
+                }
+            } else {
+                // No cache entry - check if it's a pending new directory
+                let is_pending_dir = self
+                    .pending_changes
+                    .get(path)
+                    .is_some_and(|c| matches!(c.change_type, PendingChangeType::NewDirectory));
+
+                if !is_pending_dir {
+                    // Need to check backend for entries
+                    use futures::StreamExt;
+                    let mut stream = self.inner.list_dir(path);
+                    while let Some(entry) = stream.next().await {
+                        if let Ok(entry) = entry {
+                            let entry_path = path.join(&entry.name);
+                            if !pending_deletes.contains(&entry_path) {
+                                return Err(FuseAdapterError::NotEmpty(format!(
+                                    "Directory not empty: {:?}",
+                                    path
+                                )));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Mark as deleted locally - will be synced later
         self.mark_deleted(path, true);
         Ok(())
@@ -1268,6 +1317,13 @@ impl<C: Connector + 'static> Connector for FilesystemCache<C> {
         let from_cache = self.cache_path(from);
         let to_cache = self.cache_path(to);
 
+        // Check if this is a directory rename
+        let is_directory = from_cache.is_dir()
+            || self
+                .pending_changes
+                .get(from)
+                .is_some_and(|c| matches!(c.change_type, PendingChangeType::NewDirectory));
+
         if from_cache.exists() {
             if let Some(parent) = to_cache.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| {
@@ -1286,28 +1342,121 @@ impl<C: Connector + 'static> Connector for FilesystemCache<C> {
                 .map_err(|e| FuseAdapterError::Cache(format!("Failed to rename symlink: {}", e)))?;
         }
 
-        // Update pending changes
+        // If this is a directory, we need to update all child entries in the caches
+        if is_directory {
+            let from_prefix = from.to_path_buf();
+
+            // Collect all child paths that need to be renamed in pending_changes
+            let child_paths: Vec<PathBuf> = self
+                .pending_changes
+                .iter()
+                .filter_map(|entry| {
+                    let path = entry.key();
+                    if path.starts_with(&from_prefix) && path != &from_prefix {
+                        Some(path.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            // Update pending_changes for children and rename their cache files
+            for old_path in child_paths {
+                if let Some((_, change)) = self.pending_changes.remove(&old_path) {
+                    let relative = old_path.strip_prefix(&from_prefix).unwrap();
+                    let new_path = to.join(relative);
+
+                    // Rename the cache file for this child
+                    let old_child_cache = self.cache_path(&old_path);
+                    let new_child_cache = self.cache_path(&new_path);
+                    if old_child_cache.exists() {
+                        if let Some(parent) = new_child_cache.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                        let _ = std::fs::rename(&old_child_cache, &new_child_cache);
+                    }
+
+                    self.pending_changes.insert(new_path, change);
+                }
+            }
+
+            // Collect all child paths in mode_cache
+            let mode_child_paths: Vec<PathBuf> = self
+                .mode_cache
+                .iter()
+                .filter_map(|entry| {
+                    let path = entry.key();
+                    if path.starts_with(&from_prefix) && path != &from_prefix {
+                        Some(path.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            // Update mode_cache for children
+            for old_path in mode_child_paths {
+                if let Some((_, mode)) = self.mode_cache.remove(&old_path) {
+                    let relative = old_path.strip_prefix(&from_prefix).unwrap();
+                    let new_path = to.join(relative);
+                    self.mode_cache.insert(new_path, mode);
+                }
+            }
+
+            // Invalidate metadata_cache for children
+            let meta_child_paths: Vec<PathBuf> = self
+                .metadata_cache
+                .iter()
+                .filter_map(|entry| {
+                    let path = entry.key();
+                    if path.starts_with(&from_prefix) && path != &from_prefix {
+                        Some(path.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            for old_path in meta_child_paths {
+                self.metadata_cache.remove(&old_path);
+            }
+
+            // Also invalidate dir_cache for the renamed directory itself
+            self.dir_cache.remove(from);
+        }
+
+        // Update pending changes for the item itself
         if let Some((_, change)) = self.pending_changes.remove(from) {
             self.pending_changes.insert(to.to_path_buf(), change);
         } else {
-            // File exists on backend - mark source as deleted, destination as new
+            // File/dir exists on backend - mark source as deleted, destination as new
+            let change_type = if is_directory {
+                PendingChangeType::DeletedDirectory
+            } else {
+                PendingChangeType::DeletedFile
+            };
             self.pending_changes.insert(
                 from.to_path_buf(),
                 PendingChange {
-                    change_type: PendingChangeType::DeletedFile,
+                    change_type,
                     mode: None,
                 },
             );
+            let new_change_type = if is_directory {
+                PendingChangeType::NewDirectory
+            } else {
+                PendingChangeType::NewFile
+            };
             self.pending_changes.insert(
                 to.to_path_buf(),
                 PendingChange {
-                    change_type: PendingChangeType::NewFile,
+                    change_type: new_change_type,
                     mode: self.mode_cache.get(from).map(|r| *r),
                 },
             );
         }
 
-        // Update mode cache
+        // Update mode cache for the item itself
         if let Some((_, mode)) = self.mode_cache.remove(from) {
             self.mode_cache.insert(to.to_path_buf(), mode);
         }

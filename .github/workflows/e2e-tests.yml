@@ -1,0 +1,174 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  e2e-tests:
+    runs-on: ubuntu-latest
+
+    services:
+      minio:
+        image: minio/minio:latest
+        ports:
+          - 9000:9000
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          --entrypoint ""
+        # MinIO requires a custom command since the default entrypoint is different
+        # Use a separate step to start MinIO properly
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install FUSE dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fuse3 libfuse3-dev pkg-config
+
+      - name: Enable FUSE for user
+        run: |
+          sudo modprobe fuse
+          sudo chmod 666 /dev/fuse
+
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio server /data
+
+          # Wait for MinIO to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:9000/minio/health/live > /dev/null 2>&1; then
+              echo "MinIO is ready"
+              break
+            fi
+            echo "Waiting for MinIO... ($i/30)"
+            sleep 1
+          done
+
+      - name: Build fuse-adapter
+        run: cargo build --release
+
+      - name: Build e2e test crate
+        run: cargo build -p fuse-adapter-e2e
+
+      - name: Run E2E tests
+        run: cargo test -p fuse-adapter-e2e --test '*' -- --test-threads=4
+        env:
+          MINIO_ENDPOINT: http://localhost:9000
+          MINIO_ACCESS_KEY: minioadmin
+          MINIO_SECRET_KEY: minioadmin
+          CACHE_TYPE: filesystem_fast
+          RUST_LOG: info
+
+      - name: Stop MinIO
+        if: always()
+        run: docker stop minio || true
+
+  # Separate job for benchmarks (only on main branch push)
+  benchmarks:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-bench-
+
+      - name: Install FUSE dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fuse3 libfuse3-dev pkg-config
+
+      - name: Enable FUSE for user
+        run: |
+          sudo modprobe fuse
+          sudo chmod 666 /dev/fuse
+
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio server /data
+
+          for i in {1..30}; do
+            if curl -s http://localhost:9000/minio/health/live > /dev/null 2>&1; then
+              echo "MinIO is ready"
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Build fuse-adapter
+        run: cargo build --release
+
+      - name: Setup benchmark mount
+        run: |
+          # Create a test bucket and mount for benchmarks
+          pip3 install awscli
+          export AWS_ACCESS_KEY_ID=minioadmin
+          export AWS_SECRET_ACCESS_KEY=minioadmin
+          aws --endpoint-url http://localhost:9000 s3 mb s3://benchmark-bucket
+
+          # Create mount directory
+          mkdir -p /tmp/fuse-bench
+
+          # Start fuse-adapter in background (would need proper config)
+          # For now, just note that benchmarks need manual setup
+
+      - name: Run benchmarks
+        run: |
+          # Note: Benchmarks require a mounted FUSE filesystem
+          # This is a placeholder - full benchmark CI requires more setup
+          echo "Benchmark CI setup needed - see tests/e2e/benches/ for local usage"
+          # cargo bench -p fuse-adapter-e2e -- --save-baseline ci
+
+      - name: Stop MinIO
+        if: always()
+        run: docker stop minio || true
