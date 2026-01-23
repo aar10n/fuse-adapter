@@ -36,7 +36,11 @@ async fn test_create_nested_directories() -> Result<()> {
     let mount = harness.mount();
 
     let base = random_filename("nested");
-    let path = mount.join(&base).join("level1").join("level2").join("level3");
+    let path = mount
+        .join(&base)
+        .join("level1")
+        .join("level2")
+        .join("level3");
 
     fs::create_dir_all(&path)?;
     assert_dir_exists(&path);
@@ -352,9 +356,7 @@ async fn test_interleaved_operations() -> Result<()> {
     }
 
     // Verify final state
-    let entries: Vec<_> = fs::read_dir(&basepath)?
-        .filter_map(|e| e.ok())
-        .collect();
+    let entries: Vec<_> = fs::read_dir(&basepath)?.filter_map(|e| e.ok()).collect();
 
     // Should have 10 files + 5 directories (odd-numbered ones)
     assert_eq!(entries.len(), 15);

@@ -301,9 +301,9 @@ async fn test_unicode_filenames() -> Result<()> {
     let mount = ctx.mount();
 
     let unicode_names = vec![
-        "файл.txt",      // Russian
-        "文件.txt",      // Chinese
-        "ファイル.txt",  // Japanese
+        "файл.txt",     // Russian
+        "文件.txt",     // Chinese
+        "ファイル.txt", // Japanese
         "αρχείο.txt",   // Greek
         "emoji-🎉.txt", // Emoji
     ];

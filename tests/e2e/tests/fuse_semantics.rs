@@ -13,8 +13,7 @@ mod common;
 use anyhow::Result;
 use common::*;
 use fuse_adapter_e2e::{
-    assert_file_content, assert_file_content_str, assert_file_exists, random_bytes,
-    random_filename,
+    assert_file_content, assert_file_content_str, assert_file_exists, random_bytes, random_filename,
 };
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};

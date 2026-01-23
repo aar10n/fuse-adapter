@@ -48,8 +48,10 @@ impl MountedAdapter {
         info!("Using fuse-adapter binary: {:?}", binary);
 
         // Start the process with MinIO credentials from environment
-        let access_key = std::env::var("MINIO_ACCESS_KEY").unwrap_or_else(|_| "minioadmin".to_string());
-        let secret_key = std::env::var("MINIO_SECRET_KEY").unwrap_or_else(|_| "minioadmin".to_string());
+        let access_key =
+            std::env::var("MINIO_ACCESS_KEY").unwrap_or_else(|_| "minioadmin".to_string());
+        let secret_key =
+            std::env::var("MINIO_SECRET_KEY").unwrap_or_else(|_| "minioadmin".to_string());
 
         let process = Command::new(&binary)
             .arg(config_path)
@@ -77,7 +79,10 @@ impl MountedAdapter {
 
     /// Wait for all mount points to become ready
     pub async fn wait_ready(&self, max_wait: Duration) -> Result<()> {
-        info!("Waiting for {} mount(s) to become ready...", self.mount_points.len());
+        info!(
+            "Waiting for {} mount(s) to become ready...",
+            self.mount_points.len()
+        );
 
         timeout(max_wait, async {
             for mount_point in &self.mount_points {

@@ -273,7 +273,11 @@ impl SharedHarness {
                 .await?;
         }
 
-        s3_client.delete_bucket().bucket(&bucket_name).send().await?;
+        s3_client
+            .delete_bucket()
+            .bucket(&bucket_name)
+            .send()
+            .await?;
 
         info!("Shared harness shut down");
         Ok(())

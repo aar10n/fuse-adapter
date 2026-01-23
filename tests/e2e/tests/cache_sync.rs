@@ -7,8 +7,8 @@ mod common;
 use anyhow::Result;
 use common::*;
 use fuse_adapter_e2e::{
-    assert_file_content_str, assert_file_exists, assert_not_exists, random_filename,
-    TestCacheType, TestHarness,
+    assert_file_content_str, assert_file_exists, assert_not_exists, random_filename, TestCacheType,
+    TestHarness,
 };
 use std::fs;
 use std::time::Duration;
@@ -111,13 +111,21 @@ async fn test_sync_order_parent_before_child() -> Result<()> {
 
     // Create nested structure in single operation
     fs::create_dir_all(&basepath.join("child1").join("child2"))?;
-    create_file_str(&basepath.join("child1").join("child2").join("file.txt"), "content")?;
+    create_file_str(
+        &basepath.join("child1").join("child2").join("file.txt"),
+        "content",
+    )?;
 
     harness.force_sync().await?;
 
     // Verify parent directory markers exist
     // In S3, directories are represented as prefix/, so we check for the file
-    assert!(harness.bucket().object_exists(&format!("{}/child1/child2/file.txt", base)).await?);
+    assert!(
+        harness
+            .bucket()
+            .object_exists(&format!("{}/child1/child2/file.txt", base))
+            .await?
+    );
 
     harness.cleanup().await?;
     Ok(())
@@ -142,7 +150,10 @@ async fn test_sync_order_child_delete_before_parent() -> Result<()> {
     harness.force_sync().await?;
 
     // Verify deleted from S3
-    let objects = harness.bucket().list_objects(Some(&format!("{}/", base))).await?;
+    let objects = harness
+        .bucket()
+        .list_objects(Some(&format!("{}/", base)))
+        .await?;
     assert!(objects.is_empty(), "All objects should be deleted");
 
     harness.cleanup().await?;
@@ -265,7 +276,12 @@ async fn test_directory_sync() -> Result<()> {
     harness.force_sync().await?;
 
     // File should exist in S3
-    assert!(harness.bucket().object_exists(&format!("{}/file.txt", dirname)).await?);
+    assert!(
+        harness
+            .bucket()
+            .object_exists(&format!("{}/file.txt", dirname))
+            .await?
+    );
 
     harness.cleanup().await?;
     Ok(())

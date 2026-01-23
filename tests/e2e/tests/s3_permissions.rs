@@ -6,9 +6,7 @@ mod common;
 
 use anyhow::Result;
 use common::*;
-use fuse_adapter_e2e::{
-    assert_file_exists, assert_file_mode, random_filename, TestHarness,
-};
+use fuse_adapter_e2e::{assert_file_exists, assert_file_mode, random_filename, TestHarness};
 use std::fs::{self, Permissions};
 use std::os::unix::fs::PermissionsExt;
 

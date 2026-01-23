@@ -72,10 +72,9 @@ async fn test_cache_under_size_pressure() -> Result<()> {
 /// Test that recently accessed files remain in cache (LRU behavior)
 #[tokio::test]
 async fn test_lru_cache_behavior() -> Result<()> {
-    let harness = TestHarness::with_config(|builder| {
-        builder.add_mount_with_small_cache("lru-cache", "5MB")
-    })
-    .await?;
+    let harness =
+        TestHarness::with_config(|builder| builder.add_mount_with_small_cache("lru-cache", "5MB"))
+            .await?;
 
     let mount = harness.mount();
 
@@ -122,10 +121,9 @@ async fn test_lru_cache_behavior() -> Result<()> {
 /// Test cache behavior when writing a single file larger than cache
 #[tokio::test]
 async fn test_single_large_file_exceeds_cache() -> Result<()> {
-    let harness = TestHarness::with_config(|builder| {
-        builder.add_mount_with_small_cache("big-file", "5MB")
-    })
-    .await?;
+    let harness =
+        TestHarness::with_config(|builder| builder.add_mount_with_small_cache("big-file", "5MB"))
+            .await?;
 
     let mount = harness.mount();
 
@@ -221,7 +219,10 @@ async fn test_negative_cache_expiry() -> Result<()> {
     sleep(Duration::from_secs(35)).await;
 
     // Now should see the file
-    assert!(filepath.exists(), "File should be visible after negative cache expires");
+    assert!(
+        filepath.exists(),
+        "File should be visible after negative cache expires"
+    );
 
     harness.cleanup().await?;
     Ok(())
@@ -459,10 +460,9 @@ async fn test_cache_recovery_after_restart() -> Result<()> {
 /// Test that pending changes survive brief cache pressure
 #[tokio::test]
 async fn test_pending_changes_survive_pressure() -> Result<()> {
-    let harness = TestHarness::with_config(|builder| {
-        builder.add_mount_with_small_cache("pending", "5MB")
-    })
-    .await?;
+    let harness =
+        TestHarness::with_config(|builder| builder.add_mount_with_small_cache("pending", "5MB"))
+            .await?;
 
     let mount = harness.mount();
 
@@ -484,10 +484,7 @@ async fn test_pending_changes_survive_pressure() -> Result<()> {
     harness.force_sync().await?;
 
     // Verify in S3
-    let s3_content = harness
-        .bucket()
-        .get_object("pending/important.txt")
-        .await?;
+    let s3_content = harness.bucket().get_object("pending/important.txt").await?;
     assert_eq!(String::from_utf8(s3_content)?, "important data");
 
     harness.cleanup().await?;

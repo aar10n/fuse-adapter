@@ -29,7 +29,11 @@ pub fn assert_file_not_exists(path: &Path) {
 
 /// Assert that a path does not exist at all
 pub fn assert_not_exists(path: &Path) {
-    assert!(!path.exists(), "Expected path {:?} to not exist, but it does", path);
+    assert!(
+        !path.exists(),
+        "Expected path {:?} to not exist, but it does",
+        path
+    );
 }
 
 /// Assert that a directory exists at the given path
@@ -54,7 +58,8 @@ pub fn assert_dir_not_exists(path: &Path) {
 pub fn assert_file_content(path: &Path, expected: &[u8]) {
     let actual = fs::read(path).expect(&format!("Failed to read file {:?}", path));
     assert_eq!(
-        actual, expected,
+        actual,
+        expected,
         "File content mismatch at {:?}\nExpected {} bytes, got {} bytes",
         path,
         expected.len(),
@@ -151,7 +156,8 @@ pub fn assert_dir_entry_count(path: &Path, expected_count: usize) {
 
 /// Assert that a path is a symlink
 pub fn assert_is_symlink(path: &Path) {
-    let metadata = fs::symlink_metadata(path).expect(&format!("Failed to get metadata for {:?}", path));
+    let metadata =
+        fs::symlink_metadata(path).expect(&format!("Failed to get metadata for {:?}", path));
     assert!(
         metadata.file_type().is_symlink(),
         "Expected {:?} to be a symlink, but it's not",

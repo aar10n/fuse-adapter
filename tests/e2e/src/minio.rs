@@ -44,8 +44,10 @@ impl MinioContainer {
     /// - `MINIO_SECRET_KEY`: Secret key (default: minioadmin)
     /// - `KEEP_MINIO`: If set, don't stop container on drop
     pub async fn start() -> Result<Self> {
-        let access_key = env::var("MINIO_ACCESS_KEY").unwrap_or_else(|_| DEFAULT_ACCESS_KEY.to_string());
-        let secret_key = env::var("MINIO_SECRET_KEY").unwrap_or_else(|_| DEFAULT_SECRET_KEY.to_string());
+        let access_key =
+            env::var("MINIO_ACCESS_KEY").unwrap_or_else(|_| DEFAULT_ACCESS_KEY.to_string());
+        let secret_key =
+            env::var("MINIO_SECRET_KEY").unwrap_or_else(|_| DEFAULT_SECRET_KEY.to_string());
         let keep_alive = env::var("KEEP_MINIO").is_ok();
 
         // Check if we should use an existing endpoint
@@ -90,9 +92,16 @@ impl MinioContainer {
 
             // Ensure it's running
             let inspect = docker.inspect_container(&id, None).await?;
-            if !inspect.state.as_ref().map(|s| s.running.unwrap_or(false)).unwrap_or(false) {
+            if !inspect
+                .state
+                .as_ref()
+                .map(|s| s.running.unwrap_or(false))
+                .unwrap_or(false)
+            {
                 info!("Starting stopped MinIO container");
-                docker.start_container(&id, None::<StartContainerOptions<String>>).await?;
+                docker
+                    .start_container(&id, None::<StartContainerOptions<String>>)
+                    .await?;
             }
 
             let endpoint = format!("http://localhost:{}", DEFAULT_PORT);
@@ -178,7 +187,11 @@ impl MinioContainer {
         })
     }
 
-    async fn create_s3_client(endpoint: &str, access_key: &str, secret_key: &str) -> Result<S3Client> {
+    async fn create_s3_client(
+        endpoint: &str,
+        access_key: &str,
+        secret_key: &str,
+    ) -> Result<S3Client> {
         let credentials = Credentials::new(access_key, secret_key, None, None, "test");
 
         let config = aws_sdk_s3::Config::builder()
@@ -346,7 +359,14 @@ impl TestBucket {
 
     /// Check if an object exists
     pub async fn object_exists(&self, key: &str) -> Result<bool> {
-        match self.s3_client.head_object().bucket(&self.name).key(key).send().await {
+        match self
+            .s3_client
+            .head_object()
+            .bucket(&self.name)
+            .key(key)
+            .send()
+            .await
+        {
             Ok(_) => Ok(true),
             Err(e) => {
                 // Use debug format to get full error chain including causes

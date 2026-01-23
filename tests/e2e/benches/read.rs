@@ -77,16 +77,20 @@ fn bench_random_read(c: &mut Criterion) {
     for (name, read_size) in read_sizes {
         group.throughput(Throughput::Bytes(read_size as u64));
 
-        group.bench_with_input(BenchmarkId::new("random_offset", name), &read_size, |b, &size| {
-            b.iter(|| {
-                let mut file = File::open(&path).unwrap();
-                let offset = (rand::random::<u64>() % (file_size as u64 - size as u64)) as u64;
-                file.seek(SeekFrom::Start(offset)).unwrap();
-                let mut buf = vec![0u8; size];
-                file.read_exact(&mut buf).unwrap();
-                black_box(buf.len());
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("random_offset", name),
+            &read_size,
+            |b, &size| {
+                b.iter(|| {
+                    let mut file = File::open(&path).unwrap();
+                    let offset = (rand::random::<u64>() % (file_size as u64 - size as u64)) as u64;
+                    file.seek(SeekFrom::Start(offset)).unwrap();
+                    let mut buf = vec![0u8; size];
+                    file.read_exact(&mut buf).unwrap();
+                    black_box(buf.len());
+                });
+            },
+        );
     }
 
     group.finish();

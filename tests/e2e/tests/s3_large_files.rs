@@ -186,12 +186,12 @@ async fn test_power_of_2_sizes() -> Result<()> {
     let mount = harness.mount();
 
     let sizes = vec![
-        1024,         // 1KB
-        4096,         // 4KB (page size)
-        65536,        // 64KB
-        131072,       // 128KB
-        262144,       // 256KB
-        524288,       // 512KB
+        1024,   // 1KB
+        4096,   // 4KB (page size)
+        65536,  // 64KB
+        131072, // 128KB
+        262144, // 256KB
+        524288, // 512KB
     ];
 
     for size in sizes {
@@ -217,10 +217,10 @@ async fn test_off_by_one_sizes() -> Result<()> {
     let mount = harness.mount();
 
     let sizes = vec![
-        4095,   // 4KB - 1
-        4097,   // 4KB + 1
-        65535,  // 64KB - 1
-        65537,  // 64KB + 1
+        4095,  // 4KB - 1
+        4097,  // 4KB + 1
+        65535, // 64KB - 1
+        65537, // 64KB + 1
     ];
 
     for size in sizes {

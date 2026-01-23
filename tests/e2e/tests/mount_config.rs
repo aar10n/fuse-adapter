@@ -25,8 +25,8 @@ use std::os::unix::fs::MetadataExt;
 #[tokio::test]
 async fn test_read_only_mount_allows_reads() -> Result<()> {
     // Use the builder pattern to create a read-only mount
-    let harness = TestHarness::with_config(|builder| builder.add_read_only_mount("readonly"))
-        .await?;
+    let harness =
+        TestHarness::with_config(|builder| builder.add_read_only_mount("readonly")).await?;
 
     let mount = harness.mount();
 

@@ -7,8 +7,8 @@ mod common;
 use anyhow::Result;
 use common::*;
 use fuse_adapter_e2e::{
-    assert_file_content, assert_file_exists, random_bytes, random_filename, sha256,
-    TestCacheType, TestHarness,
+    assert_file_content, assert_file_exists, random_bytes, random_filename, sha256, TestCacheType,
+    TestHarness,
 };
 use std::fs;
 use std::sync::Arc;
@@ -132,7 +132,11 @@ async fn test_concurrent_with_verification() -> Result<()> {
         let filepath = mount.join(name);
         let content = fs::read(&filepath)?;
         let actual_hash = sha256(&content);
-        assert_eq!(*expected_hash, actual_hash, "File {} content mismatch", name);
+        assert_eq!(
+            *expected_hash, actual_hash,
+            "File {} content mismatch",
+            name
+        );
     }
 
     harness.cleanup().await?;
