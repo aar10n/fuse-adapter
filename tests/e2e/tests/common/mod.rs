@@ -49,6 +49,33 @@ pub async fn shared_harness() -> &'static SharedHarness {
         .await
 }
 
+/// Get a test context with retry logic for resilience against transient failures.
+///
+/// When running many tests in parallel, the S3 client may occasionally fail
+/// due to resource contention. This function retries context creation to
+/// handle such transient failures.
+pub async fn get_test_context() -> anyhow::Result<TestContext<'static>> {
+    let harness = shared_harness().await;
+
+    // Retry context creation a few times to handle transient S3 client errors
+    let mut last_error = None;
+    for attempt in 0..3 {
+        match harness.context().await {
+            Ok(ctx) => return Ok(ctx),
+            Err(e) => {
+                if attempt < 2 {
+                    // Brief delay before retry
+                    tokio::time::sleep(std::time::Duration::from_millis(100 * (attempt as u64 + 1)))
+                        .await;
+                }
+                last_error = Some(e);
+            }
+        }
+    }
+
+    Err(last_error.unwrap())
+}
+
 // ============================================================================
 // File utilities
 // ============================================================================

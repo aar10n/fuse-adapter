@@ -134,8 +134,8 @@ impl SharedHarness {
             cache_type
         );
 
-        // Start MinIO
-        let minio = Arc::new(MinioContainer::start().await?);
+        // Get shared MinIO container (safe for parallel tests)
+        let minio = MinioContainer::shared().await?;
 
         // Create a shared test bucket
         let bucket = minio.create_test_bucket().await?;
@@ -427,8 +427,8 @@ impl TestHarness {
 
         info!("Setting up test harness with cache type: {:?}", cache_type);
 
-        // Start MinIO
-        let minio = Arc::new(MinioContainer::start().await?);
+        // Get shared MinIO container (safe for parallel tests)
+        let minio = MinioContainer::shared().await?;
 
         // Create test bucket
         let bucket = minio.create_test_bucket().await?;
@@ -635,7 +635,7 @@ pub struct HarnessBuilder {
 
 impl HarnessBuilder {
     async fn new() -> Result<Self> {
-        let minio = Arc::new(MinioContainer::start().await?);
+        let minio = MinioContainer::shared().await?;
         let bucket = minio.create_test_bucket().await?;
         let temp_dir = TempDir::new()?;
 

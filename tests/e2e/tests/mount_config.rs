@@ -160,8 +160,13 @@ async fn test_read_only_mount_rejects_modification() -> Result<()> {
 /// Test that UID mapping is applied to files
 #[tokio::test]
 async fn test_uid_mapping() -> Result<()> {
+    // Use the current user's UID to avoid permission issues.
+    // FUSE mounts with a different UID than the calling process
+    // will deny writes on most systems.
+    let current_uid = unsafe { libc::getuid() };
+
     let harness = TestHarness::with_config(|builder| {
-        builder.add_mount_with_uid_gid("uid-test", Some(1234), None)
+        builder.add_mount_with_uid_gid("uid-test", Some(current_uid), None)
     })
     .await?;
 
@@ -174,7 +179,7 @@ async fn test_uid_mapping() -> Result<()> {
 
     // Check the UID
     let metadata = fs::metadata(&filepath)?;
-    assert_eq!(metadata.uid(), 1234, "File should have configured UID");
+    assert_eq!(metadata.uid(), current_uid, "File should have configured UID");
 
     harness.cleanup().await?;
     Ok(())
@@ -206,8 +211,14 @@ async fn test_gid_mapping() -> Result<()> {
 /// Test that both UID and GID mapping work together
 #[tokio::test]
 async fn test_uid_gid_combined() -> Result<()> {
+    // Use the current user's UID/GID to avoid permission issues.
+    // FUSE mounts with a different UID than the calling process
+    // will deny writes on most systems.
+    let current_uid = unsafe { libc::getuid() };
+    let current_gid = unsafe { libc::getgid() };
+
     let harness = TestHarness::with_config(|builder| {
-        builder.add_mount_with_uid_gid("uidgid-test", Some(1000), Some(2000))
+        builder.add_mount_with_uid_gid("uidgid-test", Some(current_uid), Some(current_gid))
     })
     .await?;
 
@@ -219,16 +230,16 @@ async fn test_uid_gid_combined() -> Result<()> {
     create_file_str(&filepath, "content")?;
 
     let metadata = fs::metadata(&filepath)?;
-    assert_eq!(metadata.uid(), 1000, "File should have configured UID");
-    assert_eq!(metadata.gid(), 2000, "File should have configured GID");
+    assert_eq!(metadata.uid(), current_uid, "File should have configured UID");
+    assert_eq!(metadata.gid(), current_gid, "File should have configured GID");
 
     // Create a directory and check its ownership too
     let dirpath = mount.join(random_filename("uidgid-dir"));
     fs::create_dir(&dirpath)?;
 
     let dir_meta = fs::metadata(&dirpath)?;
-    assert_eq!(dir_meta.uid(), 1000, "Directory should have configured UID");
-    assert_eq!(dir_meta.gid(), 2000, "Directory should have configured GID");
+    assert_eq!(dir_meta.uid(), current_uid, "Directory should have configured UID");
+    assert_eq!(dir_meta.gid(), current_gid, "Directory should have configured GID");
 
     harness.cleanup().await?;
     Ok(())

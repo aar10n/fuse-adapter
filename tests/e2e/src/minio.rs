@@ -14,9 +14,14 @@ use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::OnceCell;
 use tokio::time::sleep;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
+
+/// Global shared MinIO container instance.
+/// This ensures only one container is created even when tests run in parallel.
+static SHARED_MINIO: OnceCell<Arc<MinioContainer>> = OnceCell::const_new();
 
 const MINIO_IMAGE: &str = "minio/minio:latest";
 const MINIO_CONTAINER_NAME: &str = "fuse-adapter-e2e-minio";
@@ -36,7 +41,27 @@ pub struct MinioContainer {
 }
 
 impl MinioContainer {
-    /// Start or connect to a MinIO container
+    /// Get or start a shared MinIO container.
+    ///
+    /// This method ensures only one MinIO container is created even when
+    /// multiple tests run in parallel. The container is reused across all tests.
+    ///
+    /// This is the preferred method for e2e tests.
+    pub async fn shared() -> Result<Arc<Self>> {
+        SHARED_MINIO
+            .get_or_try_init(|| async {
+                info!("Initializing shared MinIO container...");
+                let container = Self::start_internal().await?;
+                Ok(Arc::new(container))
+            })
+            .await
+            .cloned()
+    }
+
+    /// Start or connect to a MinIO container.
+    ///
+    /// Note: For parallel tests, prefer using `shared()` which ensures
+    /// only one container is created.
     ///
     /// Environment variables:
     /// - `MINIO_ENDPOINT`: Use existing MinIO at this endpoint (for CI)
@@ -44,6 +69,11 @@ impl MinioContainer {
     /// - `MINIO_SECRET_KEY`: Secret key (default: minioadmin)
     /// - `KEEP_MINIO`: If set, don't stop container on drop
     pub async fn start() -> Result<Self> {
+        Self::start_internal().await
+    }
+
+    /// Internal implementation of container startup
+    async fn start_internal() -> Result<Self> {
         let access_key =
             env::var("MINIO_ACCESS_KEY").unwrap_or_else(|_| DEFAULT_ACCESS_KEY.to_string());
         let secret_key =
@@ -438,14 +468,16 @@ impl TestBucket {
 }
 
 /// Wrapper for shared MinIO container across tests
-pub struct SharedMinio {
-    inner: Arc<MinioContainer>,
-}
+///
+/// Deprecated: Use `MinioContainer::shared()` directly instead.
+pub struct SharedMinio;
 
 impl SharedMinio {
+    /// Get the shared MinIO container.
+    ///
+    /// This now delegates to `MinioContainer::shared()` which uses a global
+    /// `OnceCell` to ensure only one container is created.
     pub async fn get() -> Result<Arc<MinioContainer>> {
-        // For now, just create a new one. In future, could use lazy_static or OnceCell
-        // to share across tests in the same process
-        Ok(Arc::new(MinioContainer::start().await?))
+        MinioContainer::shared().await
     }
 }

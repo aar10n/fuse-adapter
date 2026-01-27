@@ -33,6 +33,7 @@ bollard = "0.18"
 
 # Unix utilities (signals, mount detection)
 nix = { version = "0.29", features = ["signal", "fs"] }
+libc = "0.2"
 
 # AWS S3 client for direct verification
 aws-sdk-s3 = "1"

@@ -49,7 +49,7 @@ pub mod mount;
 pub use assertions::*;
 pub use config::{
     filesystem_cache, filesystem_cache_fast, filesystem_cache_with_interval, CacheConfig,
-    MountConfig, TestConfig, TestConfigBuilder, DEFAULT_TEST_FLUSH_INTERVAL_SECS,
+    MountConfig, S3ConnectorConfig, TestConfig, TestConfigBuilder, DEFAULT_TEST_FLUSH_INTERVAL_SECS,
     FAST_FLUSH_INTERVAL_SECS,
 };
 pub use harness::{SharedHarness, TestCacheType, TestContext, TestHarness};
