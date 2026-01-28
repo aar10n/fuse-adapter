@@ -68,7 +68,7 @@ impl MountedAdapter {
             (Stdio::null(), Stdio::null())
         };
 
-        let process = Command::new(&binary)
+        let mut process = Command::new(&binary)
             .arg(config_path)
             .env("AWS_ACCESS_KEY_ID", &access_key)
             .env("AWS_SECRET_ACCESS_KEY", &secret_key)
