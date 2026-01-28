@@ -117,7 +117,7 @@ jobs:
           fi
 
       - name: Run E2E tests
-        run: cargo test -p fuse-adapter-e2e --test '*' -- --test-threads=2
+        run: cargo test -p fuse-adapter-e2e --test '*' -- --test-threads=1
         env:
           MINIO_ENDPOINT: http://localhost:9000
           MINIO_ACCESS_KEY: minioadmin
