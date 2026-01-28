@@ -32,6 +32,13 @@ impl MountedAdapter {
         // Write config to file
         config.write_to_file(config_path)?;
 
+        // In CI, log the config for debugging
+        if std::env::var("CI").is_ok() {
+            if let Ok(config_content) = std::fs::read_to_string(config_path) {
+                debug!("Config file content:\n{}", config_content);
+            }
+        }
+
         // Collect mount points
         let mount_points: Vec<PathBuf> = config.mounts.iter().map(|m| m.path.clone()).collect();
 
@@ -70,7 +77,24 @@ impl MountedAdapter {
             .spawn()
             .with_context(|| format!("Failed to start fuse-adapter: {:?}", binary))?;
 
-        info!("Started fuse-adapter with PID {}", process.id());
+        let pid = process.id();
+        info!("Started fuse-adapter with PID {}", pid);
+
+        // In CI, wait a moment and check if process is still running
+        if std::env::var("CI").is_ok() {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            match process.try_wait() {
+                Ok(Some(status)) => {
+                    error!("fuse-adapter exited immediately with status: {:?}", status);
+                }
+                Ok(None) => {
+                    debug!("fuse-adapter is running after 500ms");
+                }
+                Err(e) => {
+                    error!("Failed to check process status: {}", e);
+                }
+            }
+        }
 
         let adapter = Self {
             process,
