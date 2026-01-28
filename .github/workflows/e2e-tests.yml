@@ -69,13 +69,13 @@ jobs:
         run: cargo build -p fuse-adapter-e2e
 
       - name: Run E2E tests
-        run: cargo test -p fuse-adapter-e2e --test '*' -- --test-threads=4
+        run: cargo test -p fuse-adapter-e2e --test '*' -- --test-threads=2
         env:
           MINIO_ENDPOINT: http://localhost:9000
           MINIO_ACCESS_KEY: minioadmin
           MINIO_SECRET_KEY: minioadmin
           CACHE_TYPE: filesystem_fast
-          RUST_LOG: info
+          RUST_LOG: debug
 
       - name: Stop MinIO
         if: always()

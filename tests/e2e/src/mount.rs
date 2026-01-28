@@ -53,12 +53,20 @@ impl MountedAdapter {
         let secret_key =
             std::env::var("MINIO_SECRET_KEY").unwrap_or_else(|_| "minioadmin".to_string());
 
+        // In CI, capture output for debugging; locally, discard for cleaner output
+        let is_ci = std::env::var("CI").is_ok();
+        let (stdout, stderr) = if is_ci {
+            (Stdio::inherit(), Stdio::inherit())
+        } else {
+            (Stdio::null(), Stdio::null())
+        };
+
         let process = Command::new(&binary)
             .arg(config_path)
             .env("AWS_ACCESS_KEY_ID", &access_key)
             .env("AWS_SECRET_ACCESS_KEY", &secret_key)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdout(stdout)
+            .stderr(stderr)
             .spawn()
             .with_context(|| format!("Failed to start fuse-adapter: {:?}", binary))?;
 
