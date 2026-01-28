@@ -43,6 +43,9 @@ jobs:
         run: |
           sudo modprobe fuse
           sudo chmod 666 /dev/fuse
+          # Enable user_allow_other for FUSE mounts
+          echo "user_allow_other" | sudo tee -a /etc/fuse.conf
+          sudo chmod 644 /etc/fuse.conf
 
       - name: Start MinIO
         run: |
@@ -67,6 +70,51 @@ jobs:
 
       - name: Build e2e test crate
         run: cargo build -p fuse-adapter-e2e
+
+      - name: Verify fuse-adapter can mount
+        run: |
+          # Create a test bucket
+          pip3 install awscli
+          export AWS_ACCESS_KEY_ID=minioadmin
+          export AWS_SECRET_ACCESS_KEY=minioadmin
+          aws --endpoint-url http://localhost:9000 s3 mb s3://test-verify-mount || true
+
+          # Create a minimal config
+          mkdir -p /tmp/verify-mount
+          cat > /tmp/verify-config.yaml << EOF
+          logging:
+            level: debug
+          mounts:
+            - path: /tmp/verify-mount
+              connector:
+                type: s3
+                bucket: test-verify-mount
+                region: us-east-1
+                endpoint: http://localhost:9000
+                force_path_style: true
+          EOF
+
+          # Try to start fuse-adapter and capture any errors
+          echo "Starting fuse-adapter..."
+          timeout 10 ./target/release/fuse-adapter /tmp/verify-config.yaml &
+          ADAPTER_PID=$!
+          sleep 3
+
+          # Check if mount succeeded
+          echo "Checking mount..."
+          mount | grep verify-mount || echo "Mount not found in mount list"
+          ls -la /tmp/verify-mount || echo "Could not list mount directory"
+
+          # Check if process is still running
+          if kill -0 $ADAPTER_PID 2>/dev/null; then
+            echo "fuse-adapter is running (PID: $ADAPTER_PID)"
+            # Try to unmount
+            fusermount -u /tmp/verify-mount || fusermount3 -u /tmp/verify-mount || true
+            kill $ADAPTER_PID || true
+          else
+            echo "fuse-adapter exited unexpectedly"
+            wait $ADAPTER_PID || echo "Exit code: $?"
+          fi
 
       - name: Run E2E tests
         run: cargo test -p fuse-adapter-e2e --test '*' -- --test-threads=2
@@ -113,6 +161,9 @@ jobs:
         run: |
           sudo modprobe fuse
           sudo chmod 666 /dev/fuse
+          # Enable user_allow_other for FUSE mounts
+          echo "user_allow_other" | sudo tee -a /etc/fuse.conf
+          sudo chmod 644 /etc/fuse.conf
 
       - name: Start MinIO
         run: |
