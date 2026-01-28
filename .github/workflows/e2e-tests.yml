@@ -13,23 +13,8 @@ env:
 jobs:
   e2e-tests:
     runs-on: ubuntu-latest
-
-    services:
-      minio:
-        image: minio/minio:latest
-        ports:
-          - 9000:9000
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-        options: >-
-          --health-cmd "curl -f http://localhost:9000/minio/health/live"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-          --entrypoint ""
-        # MinIO requires a custom command since the default entrypoint is different
-        # Use a separate step to start MinIO properly
+    # Note: MinIO is started manually in a step below because GitHub Actions
+    # services don't support custom commands for the MinIO image
 
     steps:
       - name: Checkout
