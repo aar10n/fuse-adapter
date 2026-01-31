@@ -13,6 +13,7 @@ use std::time::{Duration, Instant, SystemTime};
 use async_trait::async_trait;
 use bytes::Bytes;
 use dashmap::DashMap;
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use parking_lot::RwLock;
 use tokio::sync::Notify;
 use tracing::{debug, error, info, trace, warn};
@@ -33,6 +34,8 @@ pub struct FilesystemCacheConfig {
     pub flush_interval: Duration,
     /// TTL for cached metadata from backend
     pub metadata_ttl: Duration,
+    /// Glob patterns for files to exclude from syncing to backend
+    pub exclude_patterns: Vec<String>,
 }
 
 impl Default for FilesystemCacheConfig {
@@ -42,6 +45,7 @@ impl Default for FilesystemCacheConfig {
             max_size: 1024 * 1024 * 1024, // 1GB
             flush_interval: Duration::from_secs(30),
             metadata_ttl: Duration::from_secs(60),
+            exclude_patterns: Vec::new(),
         }
     }
 }
@@ -100,6 +104,7 @@ struct NegativeCacheEntry {
 /// - Tracks all pending changes (creates, deletes, renames, symlinks)
 /// - Caches metadata and directory listings with TTL
 /// - Preserves POSIX file modes
+/// - Supports excluding files from sync via glob patterns
 pub struct FilesystemCache<C: Connector> {
     inner: Arc<C>,
     config: FilesystemCacheConfig,
@@ -119,6 +124,8 @@ pub struct FilesystemCache<C: Connector> {
     shutdown: Arc<Notify>,
     /// Flag to track if background sync is running
     sync_running: Arc<RwLock<bool>>,
+    /// Compiled glob patterns for excluding files from sync
+    exclude_matcher: Option<GlobSet>,
 }
 
 impl<C: Connector + 'static> FilesystemCache<C> {
@@ -132,6 +139,9 @@ impl<C: Connector + 'static> FilesystemCache<C> {
             );
         }
 
+        // Build the exclude matcher from glob patterns
+        let exclude_matcher = Self::build_exclude_matcher(&config.exclude_patterns);
+
         Self {
             inner: Arc::new(connector),
             config,
@@ -143,6 +153,49 @@ impl<C: Connector + 'static> FilesystemCache<C> {
             cache_size: RwLock::new(0),
             shutdown: Arc::new(Notify::new()),
             sync_running: Arc::new(RwLock::new(false)),
+            exclude_matcher,
+        }
+    }
+
+    /// Build a GlobSet from exclude patterns
+    fn build_exclude_matcher(patterns: &[String]) -> Option<GlobSet> {
+        if patterns.is_empty() {
+            return None;
+        }
+
+        let mut builder = GlobSetBuilder::new();
+        for pattern in patterns {
+            match Glob::new(pattern) {
+                Ok(glob) => {
+                    builder.add(glob);
+                }
+                Err(e) => {
+                    warn!("Invalid exclude pattern '{}': {}", pattern, e);
+                }
+            }
+        }
+
+        match builder.build() {
+            Ok(set) => {
+                info!("Configured {} exclude patterns for sync", patterns.len());
+                Some(set)
+            }
+            Err(e) => {
+                warn!("Failed to build exclude matcher: {}", e);
+                None
+            }
+        }
+    }
+
+    /// Check if a path should be excluded from syncing to backend
+    fn is_excluded(&self, path: &Path) -> bool {
+        if let Some(ref matcher) = self.exclude_matcher {
+            // Convert path to string for matching, stripping leading slash
+            let path_str = path.to_string_lossy();
+            let path_str = path_str.trim_start_matches('/');
+            matcher.is_match(path_str)
+        } else {
+            false
         }
     }
 
@@ -709,10 +762,31 @@ impl<C: Connector + 'static> FilesystemCache<C> {
             return Ok(());
         }
 
-        info!("Syncing {} pending changes to backend", pending.len());
+        // Filter out excluded paths - they stay local only
+        let (excluded, syncable): (Vec<_>, Vec<_>) = pending
+            .into_iter()
+            .partition(|(path, _)| self.is_excluded(path));
+
+        // Remove excluded paths from pending_changes - they won't be synced
+        // but we clear them so they don't keep accumulating
+        for (path, _) in &excluded {
+            trace!("Excluding from sync (matches exclude pattern): {:?}", path);
+            self.pending_changes.remove(path);
+        }
+
+        if !excluded.is_empty() {
+            debug!("{} changes excluded from sync by pattern", excluded.len());
+        }
+
+        if syncable.is_empty() {
+            trace!("No syncable pending changes");
+            return Ok(());
+        }
+
+        info!("Syncing {} pending changes to backend", syncable.len());
 
         // Sort to process directories before files (for creates) and files before directories (for deletes)
-        let mut creates: Vec<_> = pending
+        let mut creates: Vec<_> = syncable
             .iter()
             .filter(|(_, c)| {
                 matches!(
@@ -724,7 +798,7 @@ impl<C: Connector + 'static> FilesystemCache<C> {
                 )
             })
             .collect();
-        let mut deletes: Vec<_> = pending
+        let mut deletes: Vec<_> = syncable
             .iter()
             .filter(|(_, c)| {
                 matches!(

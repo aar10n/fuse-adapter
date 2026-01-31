@@ -82,14 +82,44 @@ impl InodeTable {
         }
     }
 
-    /// Rename a path, updating the inode mapping atomically
+    /// Rename a path, updating the inode mapping atomically.
+    /// For directories, this also updates all child path mappings.
     pub fn rename_path(&self, old: &Path, new: &Path) {
         let old_normalized = normalize_path(old);
         let new_normalized = normalize_path(new);
 
-        if let Some((_, inode)) = self.path_to_inode.remove(&old_normalized) {
-            self.inode_to_path.insert(inode, new_normalized.clone());
-            self.path_to_inode.insert(new_normalized, inode);
+        // First, collect all paths that need to be renamed (the path itself and all children)
+        // We collect first to avoid holding locks during iteration
+        let paths_to_rename: Vec<(PathBuf, u64)> = self
+            .path_to_inode
+            .iter()
+            .filter_map(|entry| {
+                let path = entry.key();
+                if path == &old_normalized || path.starts_with(&old_normalized.join("")) {
+                    Some((path.clone(), *entry.value()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Now update all the mappings
+        for (old_path, inode) in paths_to_rename {
+            // Remove old mapping
+            self.path_to_inode.remove(&old_path);
+
+            // Calculate new path by replacing the old prefix with the new prefix
+            let new_path = if old_path == old_normalized {
+                new_normalized.clone()
+            } else {
+                // For children: strip old prefix and join with new prefix
+                let relative = old_path.strip_prefix(&old_normalized).unwrap();
+                new_normalized.join(relative)
+            };
+
+            // Insert new mappings
+            self.inode_to_path.insert(inode, new_path.clone());
+            self.path_to_inode.insert(new_path, inode);
         }
     }
 
@@ -171,5 +201,88 @@ mod tests {
         assert!(table.get_inode(Path::new("/foo")).is_none());
         assert_eq!(table.get_inode(Path::new("/bar")), Some(inode));
         assert_eq!(table.get_path(inode), Some(PathBuf::from("/bar")));
+    }
+
+    #[test]
+    fn test_rename_directory_with_children() {
+        let table = InodeTable::new();
+
+        // Create a directory with nested files
+        let dir_inode = table.get_or_create_inode(Path::new("/old-dir"));
+        let file_inode = table.get_or_create_inode(Path::new("/old-dir/file.txt"));
+        let nested_dir_inode = table.get_or_create_inode(Path::new("/old-dir/subdir"));
+        let nested_file_inode = table.get_or_create_inode(Path::new("/old-dir/subdir/nested.txt"));
+
+        // Rename the directory
+        table.rename_path(Path::new("/old-dir"), Path::new("/new-dir"));
+
+        // Verify old paths no longer exist
+        assert!(table.get_inode(Path::new("/old-dir")).is_none());
+        assert!(table.get_inode(Path::new("/old-dir/file.txt")).is_none());
+        assert!(table.get_inode(Path::new("/old-dir/subdir")).is_none());
+        assert!(table.get_inode(Path::new("/old-dir/subdir/nested.txt")).is_none());
+
+        // Verify new paths exist with same inodes
+        assert_eq!(table.get_inode(Path::new("/new-dir")), Some(dir_inode));
+        assert_eq!(
+            table.get_inode(Path::new("/new-dir/file.txt")),
+            Some(file_inode)
+        );
+        assert_eq!(
+            table.get_inode(Path::new("/new-dir/subdir")),
+            Some(nested_dir_inode)
+        );
+        assert_eq!(
+            table.get_inode(Path::new("/new-dir/subdir/nested.txt")),
+            Some(nested_file_inode)
+        );
+
+        // Verify reverse mapping (inode -> path) is also correct
+        assert_eq!(table.get_path(dir_inode), Some(PathBuf::from("/new-dir")));
+        assert_eq!(
+            table.get_path(file_inode),
+            Some(PathBuf::from("/new-dir/file.txt"))
+        );
+        assert_eq!(
+            table.get_path(nested_dir_inode),
+            Some(PathBuf::from("/new-dir/subdir"))
+        );
+        assert_eq!(
+            table.get_path(nested_file_inode),
+            Some(PathBuf::from("/new-dir/subdir/nested.txt"))
+        );
+    }
+
+    #[test]
+    fn test_rename_does_not_affect_siblings() {
+        let table = InodeTable::new();
+
+        // Create two directories with similar prefixes
+        let dir1_inode = table.get_or_create_inode(Path::new("/old-dir"));
+        let dir2_inode = table.get_or_create_inode(Path::new("/old-dir-other"));
+        let file_in_dir1 = table.get_or_create_inode(Path::new("/old-dir/file.txt"));
+        let file_in_dir2 = table.get_or_create_inode(Path::new("/old-dir-other/file.txt"));
+
+        // Rename only /old-dir to /new-dir
+        table.rename_path(Path::new("/old-dir"), Path::new("/new-dir"));
+
+        // /old-dir and its children should be renamed
+        assert!(table.get_inode(Path::new("/old-dir")).is_none());
+        assert!(table.get_inode(Path::new("/old-dir/file.txt")).is_none());
+        assert_eq!(table.get_inode(Path::new("/new-dir")), Some(dir1_inode));
+        assert_eq!(
+            table.get_inode(Path::new("/new-dir/file.txt")),
+            Some(file_in_dir1)
+        );
+
+        // /old-dir-other should NOT be affected (it's a sibling, not a child)
+        assert_eq!(
+            table.get_inode(Path::new("/old-dir-other")),
+            Some(dir2_inode)
+        );
+        assert_eq!(
+            table.get_inode(Path::new("/old-dir-other/file.txt")),
+            Some(file_in_dir2)
+        );
     }
 }

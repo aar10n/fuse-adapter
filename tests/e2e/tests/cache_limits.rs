@@ -333,9 +333,6 @@ async fn test_memory_cache_max_entries() -> Result<()> {
 }
 
 /// Test memory cache doesn't leak memory with repeated access
-///
-/// Note: Memory cache mode may not support all filesystem operations.
-/// This test validates the mode works for basic operations and doesn't leak.
 #[tokio::test]
 async fn test_memory_cache_no_leak() -> Result<()> {
     let harness = TestHarness::with_cache(TestCacheType::Memory).await?;
@@ -554,18 +551,3 @@ async fn test_pending_changes_survive_pressure() -> Result<()> {
     Ok(())
 }
 
-// =============================================================================
-// Helper trait extension for HarnessBuilder
-// =============================================================================
-
-trait HarnessBuilderExt {
-    fn add_mount_with_small_cache(&mut self, name: &str, max_size: &str) -> &mut Self;
-}
-
-impl HarnessBuilderExt for fuse_adapter_e2e::harness::HarnessBuilder {
-    fn add_mount_with_small_cache(&mut self, name: &str, max_size: &str) -> &mut Self {
-        // For now, use the standard cached mount
-        // TODO: When harness supports custom cache sizes, update this
-        self.add_cached_mount(name)
-    }
-}

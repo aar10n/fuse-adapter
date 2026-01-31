@@ -33,6 +33,11 @@ connectors:
       path: /var/cache/fuse-adapter/s3
       max_size: "1GB"
       flush_interval: 30s
+      # Optional: glob patterns for files to exclude from syncing to backend
+      # These files will exist locally but never be uploaded
+      # exclude_from_sync:
+      #   - "*.tmp"
+      #   - "__pycache__/**"
 
 # =============================================================================
 # Mount Points
@@ -65,10 +70,12 @@ mounts:
     connector:
       type: s3
       prefix: "data/imports/"
-    # Override the default cache for this mount
+    # Override the default cache for this mount with in-memory write-back cache
     cache:
       type: memory
       max_entries: 1000
+      max_size: "100MB"
+      flush_interval: 30s
 
   # --- Full Config (Ignoring Defaults) ---
   # When you specify 'bucket', the mount uses full config mode and
@@ -92,6 +99,34 @@ mounts:
       region: us-east-1
     cache:
       type: none
+
+  # --- Exclude from Sync Example ---
+  # This example shows how to use exclude_from_sync to keep certain files
+  # local-only while syncing the rest to the backend. Useful for:
+  # - Python virtual environments (sync packages, not binaries)
+  # - Build artifacts that should stay local
+  # - Temporary files that don't need to be persisted
+  #
+  # - path: /mnt/s3-venv
+  #   connector:
+  #     type: s3
+  #     bucket: my-bucket
+  #     prefix: "projects/myapp/"
+  #   cache:
+  #     type: filesystem
+  #     path: /var/cache/fuse-adapter/venv
+  #     max_size: "2GB"
+  #     flush_interval: 30s
+  #     exclude_from_sync:
+  #       # Exclude venv binaries and tools (platform-specific, recreatable)
+  #       - ".venv/bin/*"
+  #       - ".venv/include/*"
+  #       # Exclude pip itself (comes with Python)
+  #       - ".venv/lib/python*/site-packages/pip/*"
+  #       - ".venv/lib/python*/site-packages/pip-*.dist-info/*"
+  #       # Exclude compiled Python files (recreatable)
+  #       - "**/__pycache__/**"
+  #       - "**/*.pyc"
 
   # --- Google Drive connector ---
   # Mounts a Google Drive folder as a local filesystem.

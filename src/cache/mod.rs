@@ -14,8 +14,20 @@ pub enum CacheConfig {
     /// No caching
     #[default]
     None,
-    /// In-memory cache
-    Memory { max_entries: Option<usize> },
+    /// In-memory cache with write-back support
+    Memory {
+        /// Maximum number of cached entries
+        max_entries: Option<usize>,
+        /// Max cache size (e.g., "100MB", "500MB")
+        max_size: Option<String>,
+        /// Flush interval for syncing dirty data to backend (e.g., "30s", "1m")
+        #[serde(default)]
+        #[serde(with = "humantime_serde")]
+        flush_interval: Option<Duration>,
+        /// Glob patterns for files to exclude from syncing to backend
+        #[serde(default)]
+        exclude_from_sync: Option<Vec<String>>,
+    },
     /// Filesystem-backed cache
     Filesystem {
         path: String,
@@ -25,6 +37,9 @@ pub enum CacheConfig {
         #[serde(default)]
         #[serde(with = "humantime_serde")]
         flush_interval: Option<Duration>,
+        /// Glob patterns for files to exclude from syncing to backend
+        #[serde(default)]
+        exclude_from_sync: Option<Vec<String>>,
     },
 }
 

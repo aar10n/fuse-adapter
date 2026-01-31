@@ -332,59 +332,82 @@ test-all: test test-integration ## Run all tests (unit + integration)
 	@echo "$(GREEN)All tests complete!$(NC)"
 
 #-----------------------------------------------------------------------------
-# E2E Tests (Rust-based)
+# E2E Tests (using nextest for parallel execution)
 #-----------------------------------------------------------------------------
 
-.PHONY: test-e2e test-e2e-s3 test-e2e-cache test-e2e-quick bench bench-read bench-write bench-metadata
+.PHONY: test-e2e test-e2e-ci test-e2e-serial test-e2e-s3 test-e2e-cache test-e2e-quick test-e2e-filter test-e2e-ignored bench bench-read bench-write bench-metadata
 
-test-e2e: release minio-ensure-bucket ## Run all Rust e2e tests
-	@echo "$(GREEN)Running Rust e2e tests...$(NC)"
+# Number of parallel test threads (default: 2, safe for macOS FUSE limits)
+TEST_THREADS ?= 2
+
+test-e2e: release minio-ensure-bucket ## Run all e2e tests (TEST_THREADS=N to override parallelism)
+	@echo "$(GREEN)Running e2e tests ($(TEST_THREADS) threads)...$(NC)"
 	MINIO_ENDPOINT=http://localhost:$(MINIO_PORT) \
 	MINIO_ACCESS_KEY=$(MINIO_ROOT_USER) \
 	MINIO_SECRET_KEY=$(MINIO_ROOT_PASSWORD) \
-	cargo test -p fuse-adapter-e2e --test '*' -- --test-threads=1
+	cargo nextest run -p fuse-adapter-e2e -j $(TEST_THREADS)
+
+test-e2e-ci: release minio-ensure-bucket ## Run e2e tests with CI profile (more retries)
+	@echo "$(GREEN)Running e2e tests (CI profile, $(TEST_THREADS) threads)...$(NC)"
+	MINIO_ENDPOINT=http://localhost:$(MINIO_PORT) \
+	MINIO_ACCESS_KEY=$(MINIO_ROOT_USER) \
+	MINIO_SECRET_KEY=$(MINIO_ROOT_PASSWORD) \
+	cargo nextest run -p fuse-adapter-e2e --profile ci -j $(TEST_THREADS)
+
+test-e2e-serial: release minio-ensure-bucket ## Run e2e tests serially (for debugging)
+	@echo "$(GREEN)Running e2e tests (serial)...$(NC)"
+	MINIO_ENDPOINT=http://localhost:$(MINIO_PORT) \
+	MINIO_ACCESS_KEY=$(MINIO_ROOT_USER) \
+	MINIO_SECRET_KEY=$(MINIO_ROOT_PASSWORD) \
+	cargo nextest run -p fuse-adapter-e2e --profile serial
 
 test-e2e-s3: release minio-ensure-bucket ## Run S3 connector e2e tests
 	@echo "$(GREEN)Running S3 e2e tests...$(NC)"
 	MINIO_ENDPOINT=http://localhost:$(MINIO_PORT) \
 	MINIO_ACCESS_KEY=$(MINIO_ROOT_USER) \
 	MINIO_SECRET_KEY=$(MINIO_ROOT_PASSWORD) \
-	cargo test -p fuse-adapter-e2e --test 's3_*' -- --test-threads=1
+	cargo nextest run -p fuse-adapter-e2e -j $(TEST_THREADS) -E 'test(/^s3_/)'
 
 test-e2e-cache: release minio-ensure-bucket ## Run cache e2e tests
 	@echo "$(GREEN)Running cache e2e tests...$(NC)"
 	MINIO_ENDPOINT=http://localhost:$(MINIO_PORT) \
 	MINIO_ACCESS_KEY=$(MINIO_ROOT_USER) \
 	MINIO_SECRET_KEY=$(MINIO_ROOT_PASSWORD) \
-	cargo test -p fuse-adapter-e2e --test 'cache_*' -- --test-threads=1
+	cargo nextest run -p fuse-adapter-e2e -j $(TEST_THREADS) -E 'test(/^cache_/)'
 
-test-e2e-quick: release minio-ensure-bucket ## Run quick e2e smoke tests
+test-e2e-quick: release minio-ensure-bucket ## Run quick e2e smoke tests (s3_crud only)
 	@echo "$(GREEN)Running quick e2e tests...$(NC)"
 	MINIO_ENDPOINT=http://localhost:$(MINIO_PORT) \
 	MINIO_ACCESS_KEY=$(MINIO_ROOT_USER) \
 	MINIO_SECRET_KEY=$(MINIO_ROOT_PASSWORD) \
-	cargo test -p fuse-adapter-e2e --test 's3_crud' -- --test-threads=1
+	cargo nextest run -p fuse-adapter-e2e -j $(TEST_THREADS) -E 'binary(s3_crud)'
 
-test-e2e-mount-config: release minio-ensure-bucket ## Run mount configuration tests
-	@echo "$(GREEN)Running mount configuration e2e tests...$(NC)"
+# Test filtering variable (use regex pattern)
+# Example: make test-e2e-filter FILTER=memory_cache
+FILTER ?=
+
+test-e2e-filter: release minio-ensure-bucket ## Run filtered e2e tests (FILTER=pattern)
+	@if [ -z "$(FILTER)" ]; then \
+		echo "$(RED)Error: FILTER is required. Usage: make test-e2e-filter FILTER=pattern$(NC)"; \
+		echo "$(YELLOW)Example: make test-e2e-filter FILTER=memory_cache$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(GREEN)Running e2e tests matching '$(FILTER)'...$(NC)"
 	MINIO_ENDPOINT=http://localhost:$(MINIO_PORT) \
 	MINIO_ACCESS_KEY=$(MINIO_ROOT_USER) \
 	MINIO_SECRET_KEY=$(MINIO_ROOT_PASSWORD) \
-	cargo test -p fuse-adapter-e2e --test 'mount_config' -- --test-threads=1
+	cargo nextest run -p fuse-adapter-e2e -j $(TEST_THREADS) -E 'test(/$(FILTER)/)'
 
-test-e2e-fuse: release minio-ensure-bucket ## Run FUSE semantics tests
-	@echo "$(GREEN)Running FUSE semantics e2e tests...$(NC)"
+test-e2e-ignored: release minio-ensure-bucket ## Run ignored e2e tests (for debugging)
+	@echo "$(GREEN)Running ignored e2e tests...$(NC)"
 	MINIO_ENDPOINT=http://localhost:$(MINIO_PORT) \
 	MINIO_ACCESS_KEY=$(MINIO_ROOT_USER) \
 	MINIO_SECRET_KEY=$(MINIO_ROOT_PASSWORD) \
-	cargo test -p fuse-adapter-e2e --test 'fuse_semantics' -- --test-threads=1
+	cargo nextest run -p fuse-adapter-e2e -j $(TEST_THREADS) --run-ignored ignored-only
 
-test-e2e-cache-limits: release minio-ensure-bucket ## Run cache eviction and limits tests
-	@echo "$(GREEN)Running cache limits e2e tests...$(NC)"
-	MINIO_ENDPOINT=http://localhost:$(MINIO_PORT) \
-	MINIO_ACCESS_KEY=$(MINIO_ROOT_USER) \
-	MINIO_SECRET_KEY=$(MINIO_ROOT_PASSWORD) \
-	cargo test -p fuse-adapter-e2e --test 'cache_limits' -- --test-threads=1
+#-----------------------------------------------------------------------------
+# Benchmarks
+#-----------------------------------------------------------------------------
 
 bench: release minio-ensure-bucket mount-dirs ## Run all benchmarks
 	@echo "$(GREEN)Running benchmarks...$(NC)"

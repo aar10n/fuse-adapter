@@ -6,6 +6,34 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+/// Status overlay configuration for virtual status directory
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatusOverlayConfig {
+    /// Virtual directory name (default: ".fuse-adapter")
+    #[serde(default = "default_prefix")]
+    pub prefix: String,
+    /// Maximum number of error log entries to retain (default: 1000)
+    #[serde(default = "default_max_log_entries")]
+    pub max_log_entries: usize,
+}
+
+fn default_prefix() -> String {
+    ".fuse-adapter".to_string()
+}
+
+fn default_max_log_entries() -> usize {
+    1000
+}
+
+impl Default for StatusOverlayConfig {
+    fn default() -> Self {
+        Self {
+            prefix: default_prefix(),
+            max_log_entries: default_max_log_entries(),
+        }
+    }
+}
+
 /// Cache configuration for a mount
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
@@ -77,6 +105,10 @@ pub struct MountConfig {
     pub uid: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gid: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_overlay: Option<StatusOverlayConfig>,
     pub connector: S3ConnectorConfig,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache: Option<CacheConfig>,
@@ -195,6 +227,8 @@ impl TestConfigBuilder {
             read_only: None,
             uid: None,
             gid: None,
+            error_mode: None,
+            status_overlay: None,
             connector: S3ConnectorConfig {
                 connector_type: "s3".to_string(),
                 bucket: self.default_bucket.clone().unwrap_or_default(),
@@ -225,6 +259,8 @@ impl TestConfigBuilder {
             read_only: Some(true),
             uid: None,
             gid: None,
+            error_mode: None,
+            status_overlay: None,
             connector: S3ConnectorConfig {
                 connector_type: "s3".to_string(),
                 bucket: self.default_bucket.clone().unwrap_or_default(),
@@ -278,6 +314,8 @@ pub fn standard_test_config(
         read_only: None,
         uid: None,
         gid: None,
+        error_mode: None,
+        status_overlay: None,
         connector: S3ConnectorConfig {
             connector_type: "s3".to_string(),
             bucket: bucket.to_string(),

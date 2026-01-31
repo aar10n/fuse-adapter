@@ -68,6 +68,9 @@ jobs:
       - name: Build fuse-adapter
         run: cargo build --release
 
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
       - name: Build e2e test crate
         run: cargo build -p fuse-adapter-e2e
 
@@ -117,7 +120,7 @@ jobs:
           fi
 
       - name: Run E2E tests
-        run: cargo test -p fuse-adapter-e2e --test '*' -- --test-threads=1
+        run: cargo nextest run -p fuse-adapter-e2e --profile ci -j 2
         env:
           MINIO_ENDPOINT: http://localhost:9000
           MINIO_ACCESS_KEY: minioadmin

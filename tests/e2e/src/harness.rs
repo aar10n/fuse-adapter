@@ -37,7 +37,7 @@
 
 use crate::config::{
     filesystem_cache, filesystem_cache_fast, CacheConfig, MountConfig, S3ConnectorConfig,
-    TestConfig, TestConfigBuilder, FAST_FLUSH_INTERVAL_SECS,
+    StatusOverlayConfig, TestConfig, TestConfigBuilder, FAST_FLUSH_INTERVAL_SECS,
 };
 use crate::minio::{MinioContainer, TestBucket};
 use crate::mount::MountedAdapter;
@@ -168,6 +168,8 @@ impl SharedHarness {
                 read_only: None,
                 uid: None,
                 gid: None,
+                error_mode: None,
+                status_overlay: None,
                 connector: S3ConnectorConfig {
                     connector_type: "s3".to_string(),
                     bucket: bucket.name().to_string(),
@@ -461,6 +463,8 @@ impl TestHarness {
                 read_only: None,
                 uid: None,
                 gid: None,
+                error_mode: None,
+                status_overlay: None,
                 connector: S3ConnectorConfig {
                     connector_type: "s3".to_string(),
                     bucket: bucket.name().to_string(),
@@ -634,7 +638,8 @@ pub struct HarnessBuilder {
 }
 
 impl HarnessBuilder {
-    async fn new() -> Result<Self> {
+    /// Create a new harness builder with shared MinIO container
+    pub async fn new() -> Result<Self> {
         let minio = MinioContainer::shared().await?;
         let bucket = minio.create_test_bucket().await?;
         let temp_dir = TempDir::new()?;
@@ -672,6 +677,8 @@ impl HarnessBuilder {
             read_only: None,
             uid: None,
             gid: None,
+            error_mode: None,
+            status_overlay: None,
             connector: S3ConnectorConfig {
                 connector_type: "s3".to_string(),
                 bucket: self.bucket.name().to_string(),
@@ -707,6 +714,8 @@ impl HarnessBuilder {
             read_only: Some(true),
             uid: None,
             gid: None,
+            error_mode: None,
+            status_overlay: None,
             connector: S3ConnectorConfig {
                 connector_type: "s3".to_string(),
                 bucket: self.bucket.name().to_string(),
@@ -737,6 +746,8 @@ impl HarnessBuilder {
             read_only: None,
             uid,
             gid,
+            error_mode: None,
+            status_overlay: None,
             connector: S3ConnectorConfig {
                 connector_type: "s3".to_string(),
                 bucket: self.bucket.name().to_string(),
@@ -762,6 +773,8 @@ impl HarnessBuilder {
             read_only: None,
             uid: None,
             gid: None,
+            error_mode: None,
+            status_overlay: None,
             connector: S3ConnectorConfig {
                 connector_type: "s3".to_string(),
                 bucket: self.bucket.name().to_string(),
@@ -787,6 +800,8 @@ impl HarnessBuilder {
             read_only: None,
             uid: None,
             gid: None,
+            error_mode: None,
+            status_overlay: None,
             connector: S3ConnectorConfig {
                 connector_type: "s3".to_string(),
                 bucket: self.bucket.name().to_string(),
@@ -801,6 +816,146 @@ impl HarnessBuilder {
                 flush_interval: format!("{}s", FAST_FLUSH_INTERVAL_SECS),
                 metadata_ttl: Some("30s".to_string()),
             }),
+        });
+        self
+    }
+
+    /// Add a mount with status overlay enabled (default settings)
+    pub fn add_mount_with_status_overlay(&mut self, name: &str) -> &mut Self {
+        let mount_path = self.temp_dir.path().join(format!("mount-{}", name));
+        let cache_path = self.temp_dir.path().join(format!("cache-{}", name));
+        std::fs::create_dir_all(&mount_path).ok();
+        std::fs::create_dir_all(&cache_path).ok();
+
+        self.mounts.push(MountConfig {
+            path: mount_path,
+            read_only: None,
+            uid: None,
+            gid: None,
+            error_mode: None,
+            status_overlay: Some(StatusOverlayConfig::default()),
+            connector: S3ConnectorConfig {
+                connector_type: "s3".to_string(),
+                bucket: self.bucket.name().to_string(),
+                region: Some("us-east-1".to_string()),
+                prefix: Some(format!("{}/", name)),
+                endpoint: Some(self.minio.endpoint().to_string()),
+                force_path_style: Some(true),
+            },
+            cache: Some(filesystem_cache_fast(cache_path)),
+        });
+        self
+    }
+
+    /// Add a mount with status overlay using a custom prefix
+    pub fn add_mount_with_status_overlay_prefix(
+        &mut self,
+        name: &str,
+        prefix: &str,
+    ) -> &mut Self {
+        let mount_path = self.temp_dir.path().join(format!("mount-{}", name));
+        let cache_path = self.temp_dir.path().join(format!("cache-{}", name));
+        std::fs::create_dir_all(&mount_path).ok();
+        std::fs::create_dir_all(&cache_path).ok();
+
+        self.mounts.push(MountConfig {
+            path: mount_path,
+            read_only: None,
+            uid: None,
+            gid: None,
+            error_mode: None,
+            status_overlay: Some(StatusOverlayConfig {
+                prefix: prefix.to_string(),
+                ..Default::default()
+            }),
+            connector: S3ConnectorConfig {
+                connector_type: "s3".to_string(),
+                bucket: self.bucket.name().to_string(),
+                region: Some("us-east-1".to_string()),
+                prefix: Some(format!("{}/", name)),
+                endpoint: Some(self.minio.endpoint().to_string()),
+                force_path_style: Some(true),
+            },
+            cache: Some(filesystem_cache_fast(cache_path)),
+        });
+        self
+    }
+
+    /// Add a mount with an invalid S3 endpoint (for testing error modes)
+    pub fn add_invalid_s3_mount(&mut self, name: &str) -> &mut Self {
+        let mount_path = self.temp_dir.path().join(format!("mount-{}", name));
+        std::fs::create_dir_all(&mount_path).ok();
+
+        self.mounts.push(MountConfig {
+            path: mount_path,
+            read_only: None,
+            uid: None,
+            gid: None,
+            error_mode: None,
+            status_overlay: None,
+            connector: S3ConnectorConfig {
+                connector_type: "s3".to_string(),
+                bucket: "nonexistent-bucket".to_string(),
+                region: Some("us-east-1".to_string()),
+                prefix: None,
+                endpoint: Some("http://invalid-endpoint:9999".to_string()),
+                force_path_style: Some(true),
+            },
+            cache: None,
+        });
+        self
+    }
+
+    /// Add a mount with an invalid S3 endpoint and status overlay
+    pub fn add_invalid_s3_mount_with_overlay(&mut self, name: &str) -> &mut Self {
+        let mount_path = self.temp_dir.path().join(format!("mount-{}", name));
+        std::fs::create_dir_all(&mount_path).ok();
+
+        self.mounts.push(MountConfig {
+            path: mount_path,
+            read_only: None,
+            uid: None,
+            gid: None,
+            error_mode: None,
+            status_overlay: Some(StatusOverlayConfig::default()),
+            connector: S3ConnectorConfig {
+                connector_type: "s3".to_string(),
+                bucket: "nonexistent-bucket".to_string(),
+                region: Some("us-east-1".to_string()),
+                prefix: None,
+                endpoint: Some("http://invalid-endpoint:9999".to_string()),
+                force_path_style: Some(true),
+            },
+            cache: None,
+        });
+        self
+    }
+
+    /// Add a mount with an invalid S3 endpoint and per-mount error mode
+    pub fn add_invalid_s3_mount_with_error_mode(
+        &mut self,
+        name: &str,
+        error_mode: &str,
+    ) -> &mut Self {
+        let mount_path = self.temp_dir.path().join(format!("mount-{}", name));
+        std::fs::create_dir_all(&mount_path).ok();
+
+        self.mounts.push(MountConfig {
+            path: mount_path,
+            read_only: None,
+            uid: None,
+            gid: None,
+            error_mode: Some(error_mode.to_string()),
+            status_overlay: None,
+            connector: S3ConnectorConfig {
+                connector_type: "s3".to_string(),
+                bucket: "nonexistent-bucket".to_string(),
+                region: Some("us-east-1".to_string()),
+                prefix: None,
+                endpoint: Some("http://invalid-endpoint:9999".to_string()),
+                force_path_style: Some(true),
+            },
+            cache: None,
         });
         self
     }
@@ -837,6 +992,36 @@ impl HarnessBuilder {
             config_path,
             flush_interval_secs: self.flush_interval_secs,
         })
+    }
+
+    /// Build the harness using try_start (for testing error modes)
+    ///
+    /// This method uses `MountedAdapter::try_start` which returns `StartResult`
+    /// instead of an error when the adapter fails to start.
+    pub async fn try_build(mut self) -> Result<(TestConfig, std::path::PathBuf, crate::mount::StartResult)> {
+
+        // If no mounts configured, add a default one
+        if self.mounts.is_empty() {
+            self.add_cached_mount("default");
+        }
+
+        let config_path = self.temp_dir.path().join("config.yaml");
+
+        let config = TestConfig {
+            logging: crate::config::LoggingConfig {
+                level: self.logging_level,
+            },
+            error_mode: Some(self.error_mode),
+            mounts: self.mounts,
+        };
+
+        let result = MountedAdapter::try_start(&config, &config_path).await?;
+
+        // Keep temp_dir alive by storing in static or returning
+        // For simplicity, we leak the temp_dir to keep directories alive
+        let _temp_dir = Box::leak(Box::new(self.temp_dir));
+
+        Ok((config, config_path, result))
     }
 }
 

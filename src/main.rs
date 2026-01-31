@@ -204,16 +204,32 @@ fn wrap_with_cache<C: Connector + 'static>(
 ) -> Result<Arc<dyn Connector>, Box<dyn std::error::Error>> {
     match cache_config {
         CacheConfig::None => Ok(Arc::new(NoCache::new(connector))),
-        CacheConfig::Memory { max_entries } => {
+        CacheConfig::Memory {
+            max_entries,
+            max_size,
+            flush_interval,
+            exclude_from_sync,
+        } => {
             let config = MemoryCacheConfig {
                 max_entries: max_entries.unwrap_or(1000),
+                max_size: max_size
+                    .as_ref()
+                    .and_then(|s| fuse_adapter::cache::parse_size(s))
+                    .unwrap_or(100 * 1024 * 1024), // 100MB default
+                flush_interval: flush_interval.unwrap_or(std::time::Duration::from_secs(30)),
+                metadata_ttl: std::time::Duration::from_secs(60),
+                exclude_patterns: exclude_from_sync.clone().unwrap_or_default(),
             };
-            Ok(Arc::new(MemoryCache::new(connector, config)))
+            let cache = Arc::new(MemoryCache::new(connector, config));
+            // Start background sync task for write-back caching
+            cache.start_background_sync();
+            Ok(cache)
         }
         CacheConfig::Filesystem {
             path,
             max_size,
             flush_interval,
+            exclude_from_sync,
         } => {
             let config = FilesystemCacheConfig {
                 cache_dir: PathBuf::from(path),
@@ -223,6 +239,7 @@ fn wrap_with_cache<C: Connector + 'static>(
                     .unwrap_or(1024 * 1024 * 1024),
                 flush_interval: flush_interval.unwrap_or(std::time::Duration::from_secs(30)),
                 metadata_ttl: std::time::Duration::from_secs(60),
+                exclude_patterns: exclude_from_sync.clone().unwrap_or_default(),
             };
             let cache = Arc::new(FilesystemCache::new(connector, config));
             // Start background sync task for write-back caching

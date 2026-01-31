@@ -18,7 +18,25 @@ const DEFAULT_MOUNT_TIMEOUT: Duration = Duration::from_secs(30);
 /// How often to poll for mount readiness
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
+/// Timeout for waiting for adapter to fail (for error mode tests)
+const FAILURE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Result of trying to start the adapter
+#[derive(Debug)]
+pub enum StartResult {
+    /// Adapter started successfully
+    Success(MountedAdapter),
+    /// Adapter failed to start
+    Failed {
+        /// Exit code if the process exited
+        exit_code: Option<i32>,
+        /// Stderr output from the process
+        stderr: String,
+    },
+}
+
 /// Manages a running fuse-adapter process
+#[derive(Debug)]
 pub struct MountedAdapter {
     process: Child,
     config_path: PathBuf,
@@ -27,6 +45,148 @@ pub struct MountedAdapter {
 }
 
 impl MountedAdapter {
+    /// Try to start the adapter and return the result
+    ///
+    /// Unlike `start()`, this method handles expected failures gracefully,
+    /// returning `StartResult::Failed` instead of an error when the adapter
+    /// exits early (e.g., due to connector failures with error_mode: exit).
+    pub async fn try_start(config: &TestConfig, config_path: &Path) -> Result<StartResult> {
+        // Write config to file
+        config.write_to_file(config_path)?;
+
+        // Collect mount points
+        let mount_points: Vec<PathBuf> = config.mounts.iter().map(|m| m.path.clone()).collect();
+
+        // Create mount directories
+        for mount_point in &mount_points {
+            if !mount_point.exists() {
+                std::fs::create_dir_all(mount_point)
+                    .with_context(|| format!("Failed to create mount point: {:?}", mount_point))?;
+            }
+        }
+
+        // Find the fuse-adapter binary
+        let binary = find_fuse_adapter_binary()?;
+        info!("Using fuse-adapter binary: {:?}", binary);
+
+        // Start the process with MinIO credentials from environment
+        let access_key =
+            std::env::var("MINIO_ACCESS_KEY").unwrap_or_else(|_| "minioadmin".to_string());
+        let secret_key =
+            std::env::var("MINIO_SECRET_KEY").unwrap_or_else(|_| "minioadmin".to_string());
+
+        // Capture stderr to get error messages
+        let mut process = Command::new(&binary)
+            .arg(config_path)
+            .env("AWS_ACCESS_KEY_ID", &access_key)
+            .env("AWS_SECRET_ACCESS_KEY", &secret_key)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .with_context(|| format!("Failed to start fuse-adapter: {:?}", binary))?;
+
+        let pid = process.id();
+        info!("Started fuse-adapter with PID {} (try_start mode)", pid);
+
+        // Wait a short time to see if the process exits immediately
+        let early_exit_wait = Duration::from_millis(500);
+        sleep(early_exit_wait).await;
+
+        // Check if process has already exited
+        match process.try_wait() {
+            Ok(Some(status)) => {
+                // Process exited - this is expected for error_mode: exit
+                let exit_code = status.code();
+                let stderr = if let Some(ref mut stderr_handle) = process.stderr {
+                    let mut stderr_buf = String::new();
+                    use std::io::Read;
+                    let _ = stderr_handle.read_to_string(&mut stderr_buf);
+                    stderr_buf
+                } else {
+                    String::new()
+                };
+
+                info!(
+                    "fuse-adapter exited early with code {:?}",
+                    exit_code
+                );
+                return Ok(StartResult::Failed { exit_code, stderr });
+            }
+            Ok(None) => {
+                // Process still running - proceed to wait for mounts
+                debug!("fuse-adapter is running after {:?}", early_exit_wait);
+            }
+            Err(e) => {
+                error!("Failed to check process status: {}", e);
+                return Err(e.into());
+            }
+        }
+
+        // Drop the stderr handle before waiting for mounts (can't read and wait simultaneously)
+        drop(process.stderr.take());
+
+        let adapter = Self {
+            process,
+            config_path: config_path.to_path_buf(),
+            mount_points,
+            stopped: false,
+        };
+
+        // Try to wait for mounts
+        match timeout(FAILURE_TIMEOUT, adapter.wait_for_mounts_internal()).await {
+            Ok(Ok(())) => {
+                info!("All mounts are ready");
+                Ok(StartResult::Success(adapter))
+            }
+            Ok(Err(e)) => {
+                // Wait failed (process exited during mount wait)
+                warn!("Mount wait failed: {}", e);
+                Ok(StartResult::Failed {
+                    exit_code: None,
+                    stderr: e.to_string(),
+                })
+            }
+            Err(_) => {
+                // Timeout waiting for mounts - check if process is still running
+                if adapter.is_running() {
+                    // Process is running but mounts didn't come up
+                    Ok(StartResult::Failed {
+                        exit_code: None,
+                        stderr: "Timeout waiting for mounts".to_string(),
+                    })
+                } else {
+                    Ok(StartResult::Failed {
+                        exit_code: None,
+                        stderr: "Process exited during mount wait".to_string(),
+                    })
+                }
+            }
+        }
+    }
+
+    /// Internal helper to wait for mounts without timeout handling
+    async fn wait_for_mounts_internal(&self) -> Result<()> {
+        for mount_point in &self.mount_points {
+            loop {
+                if is_mount_ready(mount_point) {
+                    debug!("Mount {:?} is ready", mount_point);
+                    break;
+                }
+
+                // Check if process is still running
+                if !self.is_running() {
+                    return Err(anyhow::anyhow!(
+                        "fuse-adapter process exited before mount {:?} was ready",
+                        mount_point
+                    ));
+                }
+
+                sleep(POLL_INTERVAL).await;
+            }
+        }
+        Ok(())
+    }
+
     /// Start fuse-adapter with the given configuration
     pub async fn start(config: &TestConfig, config_path: &Path) -> Result<Self> {
         // Write config to file
