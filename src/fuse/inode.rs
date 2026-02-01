@@ -95,7 +95,7 @@ impl InodeTable {
             .iter()
             .filter_map(|entry| {
                 let path = entry.key();
-                if path == &old_normalized || path.starts_with(&old_normalized.join("")) {
+                if path == &old_normalized || path.starts_with(old_normalized.join("")) {
                     Some((path.clone(), *entry.value()))
                 } else {
                     None
