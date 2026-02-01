@@ -848,11 +848,7 @@ impl HarnessBuilder {
     }
 
     /// Add a mount with status overlay using a custom prefix
-    pub fn add_mount_with_status_overlay_prefix(
-        &mut self,
-        name: &str,
-        prefix: &str,
-    ) -> &mut Self {
+    pub fn add_mount_with_status_overlay_prefix(&mut self, name: &str, prefix: &str) -> &mut Self {
         let mount_path = self.temp_dir.path().join(format!("mount-{}", name));
         let cache_path = self.temp_dir.path().join(format!("cache-{}", name));
         std::fs::create_dir_all(&mount_path).ok();
@@ -998,8 +994,9 @@ impl HarnessBuilder {
     ///
     /// This method uses `MountedAdapter::try_start` which returns `StartResult`
     /// instead of an error when the adapter fails to start.
-    pub async fn try_build(mut self) -> Result<(TestConfig, std::path::PathBuf, crate::mount::StartResult)> {
-
+    pub async fn try_build(
+        mut self,
+    ) -> Result<(TestConfig, std::path::PathBuf, crate::mount::StartResult)> {
         // If no mounts configured, add a default one
         if self.mounts.is_empty() {
             self.add_cached_mount("default");

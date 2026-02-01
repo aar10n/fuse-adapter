@@ -106,10 +106,7 @@ impl MountedAdapter {
                     String::new()
                 };
 
-                info!(
-                    "fuse-adapter exited early with code {:?}",
-                    exit_code
-                );
+                info!("fuse-adapter exited early with code {:?}", exit_code);
                 return Ok(StartResult::Failed { exit_code, stderr });
             }
             Ok(None) => {

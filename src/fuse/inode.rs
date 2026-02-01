@@ -220,7 +220,9 @@ mod tests {
         assert!(table.get_inode(Path::new("/old-dir")).is_none());
         assert!(table.get_inode(Path::new("/old-dir/file.txt")).is_none());
         assert!(table.get_inode(Path::new("/old-dir/subdir")).is_none());
-        assert!(table.get_inode(Path::new("/old-dir/subdir/nested.txt")).is_none());
+        assert!(table
+            .get_inode(Path::new("/old-dir/subdir/nested.txt"))
+            .is_none());
 
         // Verify new paths exist with same inodes
         assert_eq!(table.get_inode(Path::new("/new-dir")), Some(dir_inode));

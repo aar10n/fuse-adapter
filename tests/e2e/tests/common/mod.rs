@@ -65,8 +65,10 @@ pub async fn get_test_context() -> anyhow::Result<TestContext<'static>> {
             Err(e) => {
                 if attempt < 2 {
                     // Brief delay before retry
-                    tokio::time::sleep(std::time::Duration::from_millis(100 * (attempt as u64 + 1)))
-                        .await;
+                    tokio::time::sleep(std::time::Duration::from_millis(
+                        100 * (attempt as u64 + 1),
+                    ))
+                    .await;
                 }
                 last_error = Some(e);
             }

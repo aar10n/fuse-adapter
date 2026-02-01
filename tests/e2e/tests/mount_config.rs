@@ -179,7 +179,11 @@ async fn test_uid_mapping() -> Result<()> {
 
     // Check the UID
     let metadata = fs::metadata(&filepath)?;
-    assert_eq!(metadata.uid(), current_uid, "File should have configured UID");
+    assert_eq!(
+        metadata.uid(),
+        current_uid,
+        "File should have configured UID"
+    );
 
     harness.cleanup().await?;
     Ok(())
@@ -230,16 +234,32 @@ async fn test_uid_gid_combined() -> Result<()> {
     create_file_str(&filepath, "content")?;
 
     let metadata = fs::metadata(&filepath)?;
-    assert_eq!(metadata.uid(), current_uid, "File should have configured UID");
-    assert_eq!(metadata.gid(), current_gid, "File should have configured GID");
+    assert_eq!(
+        metadata.uid(),
+        current_uid,
+        "File should have configured UID"
+    );
+    assert_eq!(
+        metadata.gid(),
+        current_gid,
+        "File should have configured GID"
+    );
 
     // Create a directory and check its ownership too
     let dirpath = mount.join(random_filename("uidgid-dir"));
     fs::create_dir(&dirpath)?;
 
     let dir_meta = fs::metadata(&dirpath)?;
-    assert_eq!(dir_meta.uid(), current_uid, "Directory should have configured UID");
-    assert_eq!(dir_meta.gid(), current_gid, "Directory should have configured GID");
+    assert_eq!(
+        dir_meta.uid(),
+        current_uid,
+        "Directory should have configured UID"
+    );
+    assert_eq!(
+        dir_meta.gid(),
+        current_gid,
+        "Directory should have configured GID"
+    );
 
     harness.cleanup().await?;
     Ok(())

@@ -74,10 +74,9 @@ async fn test_mixed_valid_invalid_mounts_continue() -> Result<()> {
 /// Test that valid mount works with global exit mode (no failures)
 #[tokio::test]
 async fn test_valid_mount_with_exit_mode() -> Result<()> {
-    let harness = TestHarness::with_config(|builder| {
-        builder.error_mode("exit").add_cached_mount("valid")
-    })
-    .await?;
+    let harness =
+        TestHarness::with_config(|builder| builder.error_mode("exit").add_cached_mount("valid"))
+            .await?;
 
     // With just a valid mount, it should work
     let mount = harness.mount();

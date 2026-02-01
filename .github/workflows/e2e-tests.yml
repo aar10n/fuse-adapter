@@ -120,7 +120,7 @@ jobs:
           fi
 
       - name: Run E2E tests
-        run: cargo nextest run -p fuse-adapter-e2e --profile ci -j 2
+        run: cargo nextest run -p fuse-adapter-e2e -j 2
         env:
           MINIO_ENDPOINT: http://localhost:9000
           MINIO_ACCESS_KEY: minioadmin

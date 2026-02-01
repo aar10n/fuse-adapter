@@ -178,7 +178,10 @@ impl<C: Connector + 'static> MemoryCache<C> {
 
         match builder.build() {
             Ok(set) => {
-                info!("Memory cache: configured {} exclude patterns for sync", patterns.len());
+                info!(
+                    "Memory cache: configured {} exclude patterns for sync",
+                    patterns.len()
+                );
                 Some(set)
             }
             Err(e) => {
@@ -332,12 +335,13 @@ impl<C: Connector + 'static> MemoryCache<C> {
         let offset = offset as usize;
 
         // Get or create the content entry
-        let mut entry = self.content_cache.entry(path.to_path_buf()).or_insert_with(|| {
-            CachedContent {
+        let mut entry = self
+            .content_cache
+            .entry(path.to_path_buf())
+            .or_insert_with(|| CachedContent {
                 data: Bytes::new(),
                 last_accessed: Instant::now(),
-            }
-        });
+            });
 
         // Calculate required size
         let required_size = offset + data.len();
@@ -567,7 +571,8 @@ impl<C: Connector + 'static> MemoryCache<C> {
             // Update cache size
             {
                 let mut cache_size = self.cache_size.write();
-                *cache_size = (*cache_size).saturating_sub(old_size as u64) + entry.data.len() as u64;
+                *cache_size =
+                    (*cache_size).saturating_sub(old_size as u64) + entry.data.len() as u64;
             }
 
             // Mark as modified
@@ -736,7 +741,10 @@ impl<C: Connector + 'static> MemoryCache<C> {
         }
 
         if !excluded.is_empty() {
-            debug!("Memory cache: {} changes excluded from sync by pattern", excluded.len());
+            debug!(
+                "Memory cache: {} changes excluded from sync by pattern",
+                excluded.len()
+            );
         }
 
         if syncable.is_empty() {
@@ -744,7 +752,10 @@ impl<C: Connector + 'static> MemoryCache<C> {
             return Ok(());
         }
 
-        info!("Memory cache syncing {} pending changes to backend", syncable.len());
+        info!(
+            "Memory cache syncing {} pending changes to backend",
+            syncable.len()
+        );
 
         // Sort to process directories before files (for creates) and files before directories (for deletes)
         let mut creates: Vec<_> = syncable
@@ -990,10 +1001,7 @@ impl<C: Connector> Drop for MemoryCache<C> {
 
         let pending_count = self.pending_changes.len();
         if pending_count > 0 {
-            warn!(
-                "{} pending changes not synced to backend",
-                pending_count
-            );
+            warn!("{} pending changes not synced to backend", pending_count);
         }
     }
 }
